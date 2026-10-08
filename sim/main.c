@@ -3111,11 +3111,13 @@ static int selftest_shop(void) {
             const int cx0 = (TANK_W - URCHIN_CARD_W) / 2, cy0 = (TANK_H - URCHIN_CARD_H) / 2;
             int lit = 0; for (int y = cy0; y < cy0 + URCHIN_CARD_H; y += 4) for (int x = cx0; x < cx0 + URCHIN_CARD_W; x += 4) lit += cfb[y * TANK_W + x] == 0xffff;
             if (lit < 20) { printf("FAIL: the urchin's card drew no white text (%d)\n", lit); return 1; }
-            int purple = 0;                                   /* the urchin itself, drawn in the tank */
+            int purple = 0;                                   /* the urchin itself, drawn in the tank (Trubbles: the mowing
+                                                                 bot - orange, red high and blue under half of it; the count
+                                                                 keeps its name) */
             render_tank(&tank, cfb, TANK_W);
             for (int y = (int)URCHIN_FLOOR_Y - 14; y <= (int)URCHIN_FLOOR_Y + 6; y++) for (int x = (int)tank.urchin_x - 14; x <= (int)tank.urchin_x + 14; x++) {
                 uint16_t v = cfb[y * TANK_W + x]; int r = v >> 11, g = (v >> 5) & 63, b = v & 31;
-                purple += r > 8 && b > 8 && g < r * 2; }
+                purple += r > 14 && b * 2 < r && g > 8; }
             if (purple < 60) { printf("FAIL: no urchin drawn at %.0f (%d px)\n", tank.urchin_x, purple); return 1; }
             printf("selftest-shop: urchin card: %.0f cm of grass, the tap hits, the card draws; %d urchin px in the tank\n", tank.urchin_grazed_px / PX_PER_CM, purple);
         }
@@ -3564,11 +3566,12 @@ static int selftest_shop(void) {
             int qx = (int)tank.shrimp[i].x, qy = (int)tank.shrimp[i].y;
             for (int y = qy - 4; y <= qy + 4; y++) for (int x = qx - 9; x <= qx + 9; x++) {
                 if (x < 0 || y < 0 || x >= TANK_W || y >= TANK_H) continue;
-                uint16_t pv = fb[y * TANK_W + x]; int pr = (pv >> 11) << 3, pg = ((pv >> 5) & 63) << 2;
-                red += pr >= 60 && pr > 2 * pg;           /* cherry, its shadow and its light (the floor's vignette darkens them) */
+                uint16_t pv = fb[y * TANK_W + x]; int pr = (pv >> 11) << 3, pg = ((pv >> 5) & 63) << 2, pb = (pv & 31) << 3;
+                red += pr >= 60 && pr > pg && pg > pb + 10;   /* (Trubbles) a crumb mite's dusty tan - red over green over blue -
+                                                                 its shadow and its light; the wall is bluer, the moss greener */
             }
         }
-        if (red < 25 * tank.shrimp_n) { printf("FAIL: %d cherry pixels for %d shrimp\n", red, tank.shrimp_n); return 1; }
+        if (red < 25 * tank.shrimp_n) { printf("FAIL: %d mite pixels for %d mites\n", red, tank.shrimp_n); return 1; }
         /* the save keeps the school, its count and its cooldown */
         int keep_n = tank.shrimp_n; tank.shrimp_food = 7; tank.shrimp_cool = 321;
         progression_save(&tank);

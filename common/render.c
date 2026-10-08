@@ -383,20 +383,26 @@ static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f) {
  * light, s a glint, e the eye, a antenna, l legs, t tail fan. */
 #define SHRIMP_TONES 8
 static const char SHRIMP_KEYS[SHRIMP_TONES + 1] = "orhsealt";
-static const uint32_t SHRIMP_RGB[SHRIMP_TONES]  = { 0x6e0f1c, 0xd0262e, 0xff5a4a, 0xffb8a0, 0x100408, 0xff7a70, 0xc0303a, 0xff7060 };
-static const uint8_t  SHRIMP_ALPHA[SHRIMP_TONES] = { 255, 255, 255, 255, 255, 140, 190, 205 };
+/* (Trubbles, 2026-10-08) the school is a colony of CRUMB MITES: the same
+ * grids and keys, redrawn - a round dusty-tan body lit from above, one eye,
+ * two short feelers, six legs that scuttle (the idle frames alternate
+ * them), nose down to a crumb (the peck), legs streaming back (the dart).
+ * Tones: o underside, r body, h the back's light, s a glint, e the eye,
+ * a feelers, l legs, t (unused) */
+static const uint32_t SHRIMP_RGB[SHRIMP_TONES]  = { 0x5e3f24, 0xc49260, 0xe6bd88, 0xfff0d2, 0x120a06, 0xd9b892, 0x8a6a48, 0xc49260 };
+static const uint8_t  SHRIMP_ALPHA[SHRIMP_TONES] = { 255, 255, 255, 255, 255, 150, 200, 255 };
 static const char *const SHRIMP_IDLE_A[8] = {
-    "..................", "......ohhs......aa", "....ohrrrhhhs..a..", "..ohrrrrrrrrrea...",
-    ".trrrrrrrrrrrrrr..", "tto..oorrrrrroo...", "t......l.l.l.l.aa.", "................a." };
+    "..................", ".......hhs......a.", ".....ohrrrhs...a..", "....orrrrrrrrea...",
+    "....orrrrrrrrr....", ".....oorrrrroo....", "......l.l.l.l.....", ".....l.l.l.l......" };
 static const char *const SHRIMP_IDLE_B[8] = {
-    "................a.", "......ohhs......a.", "....ohrrrhhhs..a..", "..ohrrrrrrrrrea...",
-    ".trrrrrrrrrrrrrr..", "tto..oorrrrrroo...", "t.....l.l.l.l..aa.", ".................." };
-static const char *const SHRIMP_PECK[8] = {      /* nose to the sand */
-    "..................", "......ohhs........", "....ohrrrhhhs.....", "..ohrrrrrrrrrr.aa.",
-    ".trrrrrrrrrrrrea..", "tto..oorrrrrrrrr..", "t......l.l.l.lo.a.", "................a." };
-static const char *const SHRIMP_DART[8] = {      /* the escape: tail snapped under, antennae streaming back */
-    "..................", "aaaa..ohhs........", "....ohrrrhhhs.....", "...orrrrrrrrrea...",
-    "...ttrrrrrrrrrr...", "...tt.oorrrroo....", "..................", ".................." };
+    "..................", ".......hhs.......a", ".....ohrrrhs....a.", "....orrrrrrrrea...",
+    "....orrrrrrrrr....", ".....oorrrrroo....", ".....l.l.l.l......", "......l.l.l.l....." };
+static const char *const SHRIMP_PECK[8] = {      /* nose to a crumb */
+    "..................", ".......hhs........", ".....ohrrrhs......", "....orrrrrrrrr....",
+    "....orrrrrrrrrea..", ".....oorrrrrroa...", "......l.l.l.l.....", ".....l.l.l.l......" };
+static const char *const SHRIMP_DART[8] = {      /* the scurry: low, legs streaming back */
+    "..................", "..................", "......ohrrhs......", "..aa.orrrrrrea....",
+    "..l.lorrrrrrr.....", "....l.oorrroo.....", "..................", ".................." };
 static void draw_shrimp(ctx_t *c, const shrimp_t *q, const src_t *pal) {
     float sp2 = q->vx * q->vx + q->vy * q->vy;
     const char *const *fr = q->dart > 0 ? SHRIMP_DART
@@ -548,7 +554,7 @@ static float    g_veg_row_dim = -1;
 static void veg_tint_fill(float dim) {
     /* the fuzz moss (Trubbles, 2026-10-08; it was seagrass): muted sage stalks
        and paler puffs at their tips; the sword plant's pair unchanged */
-    static const uint32_t frond[6] = { 0x6f9763, 0x5d8668, 0x8dbb48, 0x6c9d38, 0xa9c98c, 0x93b98a };
+    static const uint32_t frond[6] = { 0x6f9763, 0x5d8668, 0x4f9a52, 0x3e8546, 0xa9c98c, 0x93b98a };   /* moss, the tall fern, the moss's puffs */
     if (g_veg_row_dim == dim) return;
     for (int y = 0; y < TANK_H; y++) {
         uint32_t w = wall_rgb(y);
@@ -618,9 +624,10 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
         fuzz_made = true;
     }
     int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
-    /* the sword plant (bed 3, the shop): broad lanceolate leaves - a narrow
-       stem, 7 px half-width at 40% of the way up, a point at the tip - a
-       lazier sway, its own yellow-green pair */
+    /* the tall fern (bed 3, the shop; it was the sword plant): a slim stem
+       with feathery leaflets either side - wide on alternate 3 px bands, so
+       the frond reads as a row of leaflets - tapering to the tip, a lazier
+       sway, its own fern-green pair */
     bool sword = tank_veg_kind(t, b) == VEG_KIND_SWORD;
     /* fuzz moss: a soft stalk, a little sturdier than the grass was, and a
        fuzzy puff at its tip - a cut frond is shorter moss with its puff where
@@ -659,7 +666,7 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
              * to nothing at 29 segments, a hidden height cap now that fronds
              * grow to the ceiling (VEG_SEGS_FULL) */
             float u = sp / (segs > 1 ? segs - 1 : 1);
-            float half = sword ? 1.2f + 6.0f * (u < 0.4f ? u / 0.4f : (1 - u) / 0.6f)
+            float half = sword ? 0.9f + (((TANK_BOT - 16 - y) / 3 + i) & 1 ? 5.5f : 2.0f) * (1 - u) * (u < 0.12f ? u / 0.12f : 1)
                                : root - (root - tip) * u;
             if (half < tip) half = tip;
             bool in_puff = false;
@@ -1247,10 +1254,14 @@ static void draw_coral(ctx_t *c, int cx, uint32_t rgb, float growth, bool final)
  * head points +y from the foot's centre, turned to the heading like the
  * sprite was; ~22 x 25 px. The tone rule runs over ~750 px per pose. */
 enum { SN_S0, SN_S1, SN_S2, SN_S3, SN_S4, SN_F0, SN_F1, SN_F2, SN_F3, SN_TIP, SN_EYE, SN_NONE };
+/* (Trubbles, 2026-10-08) the snail is a CLEANING BOT - the same slots, the
+ * same light from the upper left: S0..S4 its steel body, lit .. shadow; F0 /
+ * F1 its yellow stripe, lit / not; F2 / F3 the brush; TIP its status light;
+ * EYE the sensor lens */
 static const uint32_t SNAIL_RGB[SN_NONE] = {
-    0xf8c868, 0xe6953c, 0xc4641e, 0x8c3d16, 0x4a2010,      /* the shell: lit .. the groove */
-    0xf2ebe4, 0xd8cec6, 0xb3a7a6, 0x847a80,                /* the foot: lit .. its edge */
-    0x1a1c34, 0x0a0c18 };                                  /* stalk tips; the eye and the mouth */
+    0xe7edf2, 0xb9c4cd, 0x8996a2, 0x5b6672, 0x2c333b,      /* the body: lit .. shadow */
+    0xffcf6a, 0xe0a43a, 0x4a535d, 0x22282e,                /* the stripe; the brush */
+    0x6dffb0, 0x0c1014 };                                  /* the status light; the lens */
 #define SNAIL_SOLE_DY   6.0f                               /* the sole below snail_y (the sprite's centre) */
 #define SNAIL_TINT_FLOOR 0.84f
 #define SNAIL_TINT_GLASS 0.90f
@@ -1277,43 +1288,27 @@ static inline int sn_shell_tone(int band, float lit, bool rim) {
  * this column (computed once per column by the caller) */
 typedef struct { float heave, sw1, sw2; } sn_sway_t;       /* this frame's heave and stalk sways: once, not per pixel (2026-10-03) */
 static int snail_upright_tone(int lx, int ly, float top, float clock, const sn_sway_t *sw) {
-    float heave = sw->heave;
-    float sw1 = sw->sw1, sw2 = sw->sw2;
-    float u;
-    /* the eye stalks, swaying against each other */
-    if (sn_seg(lx, ly, 12.5f, -7.5f, 17.5f + sw1, -13.5f, 0.7f, &u)) return u > 0.78f ? SN_TIP : SN_F1;
-    if (sn_seg(lx, ly, 13.5f, -6.5f, 18.5f + sw2, -9.5f, 0.7f, &u)) return u > 0.78f ? SN_TIP : SN_F1;
-    /* the shell: a disc, the whorl a spiral about an apex left of centre */
-    const float cx = -3.5f, cy = -9.5f + heave, R = 8.6f;
-    float dx = lx - cx, dy = ly - cy;
-    float r = sqrtf(dx * dx + dy * dy * 1.0816f);
-    if (r <= R) {
-        float ax = lx - (cx - 1.5f), ay = ly - (cy + 0.5f);
-        float ar = sqrtf(ax * ax + ay * ay), th = atan2f(ay, ax);
-        const float pitch = 2.25f;                                 /* ~4 turns: Strato asked for one more groove */
-        float w = fmodf(ar - th / TAU * pitch, pitch); if (w < 0) w += pitch; w /= pitch;
-        int tone = sn_shell_tone(w < 0.5f ? 1 : w < 0.74f ? 2 : 3, (-dx * 0.55f - dy * 0.83f) / R, r > R - 1.3f);
-        if (ar < 2.2f) tone = 3;                                   /* the apex whorl is tight and dark */
-        { float gx = (dx + 3.4f) * 0.8f, gy = dy + 4.6f; if (gx * gx + gy * gy < 4.0f) tone = 0; }   /* a wet gleam */
-        return SN_S0 + sn_clamp(tone, 0, 4);
-    }
-    /* the foot: a low lens under the shell, the head rising at the front */
-    if (lx >= -15 && lx <= 13 && ly >= top && ly <= 0) {
+    (void)top;
+    /* the cleaning bot, side on, facing +x: a steel dome with a yellow
+       stripe, the sensor lens at the front, a status light on top that
+       blinks, and the brush skirt underneath turning as it goes */
+    float cy = -7.0f + sw->heave * 0.5f, dx = lx, dy = ly - cy;
+    if (ly > -2.0f && ly <= 0 && lx >= -11 && lx <= 11)            /* the brush skirt */
+        return ((int)floorf(lx + clock * 18.0f) & 1) ? SN_F2 : SN_F3;
+    float e = (dx / 11.5f) * (dx / 11.5f) + (dy / 6.8f) * (dy / 6.8f);
+    if (e <= 1.0f && ly <= -2.0f) {
+        { float lx2 = lx - 8.2f, ly2 = ly - (cy - 1.0f); if (lx2 * lx2 + ly2 * ly2 < 2.6f) return SN_EYE; }   /* the lens */
+        float lit = (-dx * 0.5f - dy * 0.85f) / 9.0f;
+        if (ly >= cy + 1.0f && ly <= cy + 2.4f) return lit > -0.1f ? SN_F0 : SN_F1;   /* the stripe */
         int tone = 1;
-        if (ly < top + 1.4f) tone = 0;                             /* the lit ridge */
-        if (ly > -0.9f) tone = 2;                                  /* the belly line */
-        if (r < R + 1.8f && dy > 0 && tone < 3) tone++;            /* the shell's shadow */
-        if (ly > -2.2f && tone <= 1 && fast_sin(lx * 1.1f + clock * 3.0f + TAU) > 0.7f) tone = 0;   /* a pedal wave runs back */
-        if ((chash(lx, ly) & 7) == 0) tone = sn_clamp(tone + 1, 0, 3);
-        return SN_F0 + tone;
+        if (lit > 0.45f) tone = 0; else if (lit < -0.2f) tone = 2;
+        if (lit < -0.6f) tone = 3;
+        if (e > 0.82f) tone = lit > 0.1f ? 1 : 4;                   /* the rim */
+        return SN_S0 + tone;
     }
-    /* the head */
-    { float hx = (lx - 11.5f) * 1.05f, hy = ly + 5.2f;
-      if (hx * hx + hy * hy <= 9.0f) {
-          float ex = lx - 12.6f, ey = ly + 5.6f;
-          if (ex * ex + ey * ey < 0.64f) return SN_EYE;
-          return (-(lx - 11.5f) * 0.5f - hy) > 0.9f ? SN_F0 : SN_F1;
-      } }
+    { float tx = lx, ty = ly - (cy - 7.6f);                         /* the status light, on a short stem */
+      if (tx * tx + ty * ty < 1.9f) return fmodf(clock * 1.2f, 1.0f) < 0.55f ? SN_TIP : SN_S3;
+      if (lx == 0 && ly > cy - 7.0f && ly < cy - 6.0f) return SN_S3; }
     return SN_NONE;
 }
 /* ON THE GLASS: local (lx, ly) is turned to the heading; (sx, sy) is the
@@ -1322,45 +1317,34 @@ static int snail_upright_tone(int lx, int ly, float top, float clock, const sn_s
 /* (the body under the stalks: the foot, whose pedal waves move with the
  * clock - *foot says so - or the shell, which depends on the place alone) */
 static int snail_glass_body(float lx, float ly, float sx, float sy, float clock, bool *foot) {
+    /* the cleaning bot from inside the pane: a disc with a steel rim, the
+       yellow stripe a ring, the lens at the front (+y, its heading), the
+       status light at the back, and the round scrubber in the middle
+       spinning - the scrubber and the light change with the clock (*foot:
+       asked every frame), the rest only with the heading */
     *foot = false;
+    float r = sqrtf(lx * lx + ly * ly);
+    if (r > 10.5f) return SN_NONE;
     float lit = (-sx * 0.55f - sy * 0.83f) / 11.0f;
-    /* the foot: an egg, broad under the shell, narrowing to the head */
-    float ey = ly / 11.0f;
-    if (ey >= -1 && ey <= 1) {
-        float rx = 6.6f * sqrtf(1 - ey * ey) * (1 - 0.18f * ey);
-        float alx = lx < 0 ? -lx : lx;
-        if (rx > 0.3f && alx <= rx) {
-            *foot = true;
-            int tone = 1;
-            if (fast_sin(ly * 0.75f - clock * 2.6f + 64 * TAU) > 0.6f) tone = 0;   /* pedal waves crawl head-ward */
-            float edge = alx / rx;
-            if (edge > 0.8f) tone = 2;                             /* the foot's edge */
-            else if (edge > 0.62f && lit < 0 && tone < 1) tone = 1; /* the shadow side falls off */
-            if (alx < 1.2f && ly > 2 && tone < 2) tone = 2;        /* the pedal groove */
-            if (ly < -5 && edge < 0.5f && tone > 1) tone = 1;
-            if ((chash((int)floorf(lx), (int)floorf(ly)) & 7) == 0) tone = sn_clamp(tone + 1, 0, 3);
-            if (alx < 1.5f && ly >= 7.4f && ly <= 8.8f) return SN_EYE;   /* the mouth */
-            return SN_F0 + tone;
-        }
+    if (r > 9.3f) return SN_S0 + (lit > 0.2f ? 2 : lit < -0.3f ? 4 : 3);     /* the rim */
+    if (r < 4.8f) {                                                            /* the scrubber */
+        *foot = true;
+        return fast_sin(atan2f(ly, lx) * 4.0f + clock * 7.0f + 64 * TAU) > 0 ? SN_F2 : SN_F3;
     }
-    /* the shell behind: a crescent of whorl lobes round the top and sides */
-    float qx = lx / 11.0f, qy = (ly + 2.5f) / 10.6f;
-    float sr = sqrtf(qx * qx + qy * qy);
-    if (sr <= 1 && ly < 6.5f) {
-        float lobe = fast_sin(atan2f(ly + 2.5f, lx) * 5.0f - 0.3f + 8 * TAU);
-        int tone = sn_shell_tone(lobe > 0.15f ? 1 : 2, lit, sr > 0.88f);
-        if (sr < 0.78f) tone++;                                    /* shadow where the foot meets it */
-        { float gx = sx + 5.0f, gy = sy + 7.8f; if (gx * gx + gy * gy < 2.9f) tone = 0; }   /* gleam */
-        return SN_S0 + sn_clamp(tone, 0, 4);
+    if (ly > 6.2f && ly < 8.8f && fabsf(lx) < 1.7f) return SN_EYE;            /* the lens */
+    if (ly < -6.0f && ly > -8.8f && fabsf(lx) < 1.4f) {                       /* the status light */
+        *foot = true;
+        return fmodf(clock * 1.2f, 1.0f) < 0.55f ? SN_TIP : SN_S3;
     }
-    return SN_NONE;
+    if (r > 6.3f && r < 7.5f) return lit > -0.1f ? SN_F0 : SN_F1;             /* the stripe */
+    int tone = 1;
+    if (lit > 0.4f) tone = 0; else if (lit < -0.2f) tone = 2;
+    if (lit < -0.6f) tone = 3;
+    return SN_S0 + tone;
 }
-/* stalk_y[0] / [1]: the left and right stalk's tip height this frame */
+/* (stalk_y: the snail's eye stalks - the bot has none; kept for the call) */
 static int snail_glass_tone(float lx, float ly, float sx, float sy, float clock, const float *stalk_y) {
-    float u;
-    for (int sgn = -1; sgn <= 1; sgn += 2)                        /* the stalks: stubs by the head */
-        if (sn_seg(lx, ly, sgn * 2.2f, 10.0f, sgn * 3.6f, stalk_y[sgn > 0], 0.6f, &u))
-            return u > 0.7f ? SN_TIP : SN_F2;
+    (void)stalk_y;
     bool foot;
     return snail_glass_body(lx, ly, sx, sy, clock, &foot);
 }
@@ -1444,7 +1428,10 @@ static void draw_snail(ctx_t *c, const tank_t *t, bool upright_pass) {
  * and work faster while it chews. The dome's centre is (urchin_x,
  * URCHIN_FLOOR_Y); its flat base sits on the root line, UR_BASE below. */
 enum { UR_T0, UR_T1, UR_T2, UR_T3, UR_T4, UR_T5, UR_NONE };
-static const uint32_t URCHIN_RGB[UR_NONE] = { 0x320746, 0x66107d, 0x9732b1, 0xbe53bc, 0xf88ab8, 0xfff0d3 };
+/* (Trubbles, 2026-10-08) the urchin is a MOWING BOT: T0 the wheels and the
+ * shadow, T1..T3 its orange body (shadow, body, lit), T4 steel (hubs, the
+ * cutting comb), T5 the light and the comb's glint */
+static const uint32_t URCHIN_RGB[UR_NONE] = { 0x1b2026, 0xb4561a, 0xe5822a, 0xffb661, 0x8996a2, 0xfff0d3 };
 #define UR_SPINES 11
 #define UR_FACE    5
 #define UR_RX     10.0f
@@ -1452,7 +1439,8 @@ static const uint32_t URCHIN_RGB[UR_NONE] = { 0x320746, 0x66107d, 0x9732b1, 0xbe
 #define UR_BASE   7.0f
 #define UR_TINT   0.93f
 typedef struct { float dx[UR_SPINES + UR_FACE], dy[UR_SPINES + UR_FACE], len[UR_SPINES + UR_FACE];
-                 float rim[UR_SPINES], end[UR_SPINES], den[UR_SPINES]; } ur_pose_t;   /* per crown spine: where it leaves the dome, its tip, the wedge's taper -
+                 float rim[UR_SPINES], end[UR_SPINES], den[UR_SPINES];
+                 float clock; bool chew; } ur_pose_t;   /* per crown spine: where it leaves the dome, its tip, the wedge's taper -
                                                                                         once a frame here, not per pixel (2026-10-03: a sqrtf and two
                                                                                         divides per spine per pixel cost the 1.8 milliseconds a frame) */
 /* the spines this frame: a fan from just under the left side, over the top,
@@ -1460,6 +1448,7 @@ typedef struct { float dx[UR_SPINES + UR_FACE], dy[UR_SPINES + UR_FACE], len[UR_
  * turn; then a few short ones on the dome's face, pointing at the viewer
  * and down - the pale streaks of the art */
 static void urchin_pose(ur_pose_t *p, float clock, bool chewing) {
+    p->clock = clock; p->chew = chewing;
     float amp = chewing ? 0.13f : 0.07f, sp = chewing ? 2.6f : 0.8f;
     for (int k = 0; k < UR_SPINES; k++) {
         float a = -3.14159f - 0.32f + k * (3.14159f + 0.64f) / (UR_SPINES - 1);
@@ -1477,45 +1466,35 @@ static void urchin_pose(ur_pose_t *p, float clock, bool chewing) {
         p->len[UR_SPINES + k] = 4.5f;
     }
 }
-/* the tone at local (lx, ly) from the dome's centre, or UR_NONE */
+/* the mowing bot (it was the urchin's dome and spines): the tone at local
+ * (lx, ly) from its centre, or UR_NONE. A low rounded orange body lit from
+ * the upper left, two wheels with steel hubs at its ends, a toothed cutting
+ * comb along its underside that whirs while it grazes, and a light on top
+ * that blinks. Symmetric: it mows either way. */
 static int urchin_tone(float lx, float ly, const ur_pose_t *p) {
     if (ly > UR_BASE) return UR_NONE;
-    float lit = (-lx * 0.55f - ly * 0.83f) / UR_RX;                /* -1..1: lower right .. upper left */
-    float ex = lx / UR_RX, ey = ly / UR_RY, er = ex * ex + ey * ey;
-    /* the face spines first: they stand over the dome */
-    for (int k = UR_SPINES; k < UR_SPINES + UR_FACE; k++) {
-        static const float FX[UR_FACE] = { -4.5f, 0.5f, -5.0f, 2.0f, 5.5f }, FY[UR_FACE] = { -2.5f, -4.5f, 3.0f, 2.5f, 0.0f };
-        float vx = lx - FX[k - UR_SPINES], vy = ly - FY[k - UR_SPINES];
-        float u = vx * p->dx[k] + vy * p->dy[k], w = vx * p->dy[k] - vy * p->dx[k];
-        if (u < 0 || u > p->len[k]) continue;
-        float half = 1.6f * (1 - u / p->len[k]) + 0.35f;
-        if (w * w > half * half) continue;
-        return u > p->len[k] - 1.6f ? UR_T5 : lit > 0 ? UR_T4 : UR_T3;
+    for (int s = -1; s <= 1; s += 2) {                               /* the wheels */
+        float wx = lx - s * 8.5f, wy = ly - 3.5f, wr = wx * wx + wy * wy;
+        if (wr < 13.0f) return wr < 2.2f ? UR_T4 : UR_T0;
     }
-    if (er <= 1.0f) {                                               /* the dome */
+    if (ly > 1.5f && ly < 5.5f && lx > -6.5f && lx < 6.5f) {           /* the comb */
+        int tooth = ((int)floorf(lx + (p->chew ? p->clock * 22.0f : 0)) & 1);
+        if (ly > 3.5f) return tooth ? UR_T4 : UR_NONE;
+        return tooth && p->chew && fmodf(p->clock * 9.0f, 1.0f) < 0.3f ? UR_T5 : UR_T0;
+    }
+    float ex = lx / 12.0f, ey = (ly + 1.0f) / 6.5f, er = ex * ex + ey * ey;
+    if (er <= 1.0f && ly <= 2.0f) {                                  /* the body */
+        float lit = (-lx * 0.55f - (ly + 1.0f) * 0.83f) / 9.0f;
         int tone = 2;
-        if (lit > 0.15f) tone = 3;
-        if (lit > 0.55f && er > 0.20f) tone = 4;
-        if (lit < -0.30f) tone = 1;
-        if (lit < -0.75f || ly > UR_BASE - 1.2f) tone = 0;
-        int ix = (int)floorf(lx), iy = (int)floorf(ly);
-        uint32_t h = chash(ix + 40, iy + 40);
-        if ((h & 7) == 0) tone = tone > 0 ? tone - 1 : 0;           /* the mottle */
-        else if ((h & 15) == 1 && tone < 4) tone++;
+        if (lit > 0.35f) tone = 3;
+        if (lit < -0.3f || ly > 1.0f) tone = 1;
+        if (er > 0.85f && lit < 0.2f) tone = 1;
+        if (ly > -1.5f && ly < -0.5f && fabsf(lx) < 9.0f) tone = 0;     /* a panel line */
         return UR_T0 + tone;
     }
-    /* the crown: a spine is a wedge from inside the dome out to a fine point */
-    for (int k = 0; k < UR_SPINES; k++) {
-        float u = lx * p->dx[k] + ly * p->dy[k], w = lx * p->dy[k] - ly * p->dx[k];
-        float rim = p->rim[k], end = p->end[k];
-        if (u < rim - 2 || u > end) continue;
-        float half = 2.6f * (end - u) / p->den[k] + 0.3f;
-        if (w * w > half * half) continue;
-        float slit = -p->dx[k] * 0.55f - p->dy[k] * 0.83f;          /* the spine's own side of the light */
-        if (u > end - 1.8f) return slit > -0.5f ? UR_T5 : UR_T4;    /* pale tips */
-        if (u > end - 3.8f) return slit > -0.3f ? UR_T4 : UR_T3;
-        return slit > 0.2f ? UR_T3 : slit > -0.5f ? UR_T2 : UR_T1;
-    }
+    { float tx = lx, ty = ly + 8.6f;                                   /* the light on a stub */
+      if (tx * tx + ty * ty < 1.8f) return fmodf(p->clock * 0.9f, 1.0f) < 0.5f ? UR_T5 : UR_T4;
+      if (fabsf(lx) < 0.6f && ly > -8.0f && ly < -7.0f) return UR_T4; }
     return UR_NONE;
 }
 static void draw_urchin(ctx_t *c, const tank_t *t) {
@@ -2534,8 +2513,8 @@ static void snail_card_draw(ctx_t *c, const tank_t *t) {
     rect_edge(c, X, Y, W, H, 0x9fd8e2); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
     const icon_t *ic = &icon_snail_upright;
     blit_icon_scaled(c, X + (W - ic->w * 2) / 2, Y + 10, ic, 2, true);
-    draw_text(c, X + (W - text_w("SNAIL", 3)) / 2, Y + 82, 3, 0xffffff, "SNAIL");
-    const char *cap = "ALGAE GRAZED SO FAR";
+    draw_text(c, X + (W - text_w("CLEANING BOT", 3)) / 2, Y + 82, 3, 0xffffff, "CLEANING BOT");
+    const char *cap = "GRIME SCRUBBED SO FAR";
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 112, 2, 0x9fd8e2, cap);
     char n[24];
     if (t->snail_grazed <= 0) snprintf(n, sizeof n, "NOTHING YET");
@@ -2561,16 +2540,16 @@ static void urchin_card_draw(ctx_t *c, const tank_t *t) {
             src_t sc = src_color(URCHIN_RGB[tone], 1.0f);
             for (int yy = 0; yy < S; yy++) span(c, ox + lx * S, ox + lx * S + S - 1, oy + ly * S + yy, &sc, 255);
         }
-    draw_text(c, X + (W - text_w("SEA URCHIN", 3)) / 2, Y + 90, 3, 0xffffff, "SEA URCHIN");
-    const char *cap = "GRASS GRAZED SO FAR";
+    draw_text(c, X + (W - text_w("MOWING BOT", 3)) / 2, Y + 90, 3, 0xffffff, "MOWING BOT");
+    const char *cap = "MOSS MOWN SO FAR";
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 118, 2, 0x9fd8e2, cap);
     char n[24]; int cm = (int)(t->urchin_grazed_px / PX_PER_CM);
     if (cm < 1) snprintf(n, sizeof n, "NOTHING YET");
     else if (cm < 1000) snprintf(n, sizeof n, "%d CM", cm);
     else snprintf(n, sizeof n, "%d.%dK CM", cm / 1000, cm % 1000 / 100);   /* 1.0K CM and up: the line never outgrows the card (0.3.2) */
     draw_text(c, X + (W - text_w(n, 3)) / 2, Y + 140, 3, 0xffffff, n);
-    const char *now = tank_urchin_chewing(t) ? "CHEWING"
-                    : t->urchin_frond >= 0 ? "OFF TO THE TALL GRASS"
+    const char *now = tank_urchin_chewing(t) ? "MOWING"
+                    : t->urchin_frond >= 0 ? "OFF TO THE TALL MOSS"
                     : "RESTING";
     draw_text(c, X + (W - text_w(now, 2)) / 2, Y + 170, 2, 0x9fd8e2, now);
 }
@@ -2602,11 +2581,11 @@ static void shrimp_card_draw(ctx_t *c, const tank_t *t) {
             for (int yy = 0; yy < S; yy++) span(c, sx + x * S, sx + x * S + S - 1, sy + y * S + yy, &pal[ti], SHRIMP_ALPHA[ti]);
         }
     char line[32];
-    snprintf(line, sizeof line, "%d SHRIMP", n);
+    snprintf(line, sizeof line, "%d MITES", n);
     draw_text(c, X + (W - text_w(line, 3)) / 2, Y + 46, 3, 0xffffff, line);
     snprintf(line, sizeof line, "%d PELLET%s EATEN", (int)t->shrimp_eaten, t->shrimp_eaten == 1 ? "" : "S");
     draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 76, 2, 0x9fd8e2, line);
-    const char *cap = "NEXT SHRIMP";
+    const char *cap = "NEXT MITE";
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 104, 2, 0x9fd8e2, cap);
     bool full = n >= SHRIMP_MAX;
     int have = full ? SHRIMP_PER_JOIN : t->shrimp_food;
@@ -2618,8 +2597,8 @@ static void shrimp_card_draw(ctx_t *c, const tank_t *t) {
             fill_ellipse(c, x - 2, py - 2, 2.2f, 2.2f, 0xffe9bd, 255);
         } else ring(c, x, py, 6, 0x5a6a6e);
     }
-    if (full) snprintf(line, sizeof line, "THE SCHOOL IS FULL");
-    else if (tank_shrimp_refusing(t)) snprintf(line, sizeof line, "TOO MUCH ALGAE TO EAT");
+    if (full) snprintf(line, sizeof line, "THE COLONY IS FULL");
+    else if (tank_shrimp_refusing(t)) snprintf(line, sizeof line, "TOO MUCH GRIME TO EAT");
     else if (t->shrimp_food >= SHRIMP_PER_JOIN && t->shrimp_cool > 0) {
         int m = (int)ceilf(t->shrimp_cool / 60.0f);
         snprintf(line, sizeof line, "ARRIVES IN %d MIN", m < 1 ? 1 : m);

@@ -459,12 +459,13 @@ static void chevron(uint16_t *fb, int stride, int cx, int y, bool up, uint32_t r
         render_rect(fb, stride, cx + i * 4, yy, 4, 4, rgb);
     }
 }
-/* a small sword leaf for the depth tiles: `h` px tall on the spine x, the
- * plant's own lanceolate taper (widest at 40% up) in its yellow-green */
+/* a small fern frond for the depth tiles (Trubbles; it was a sword leaf):
+ * `h` px tall on the spine x, leaflets on alternate 2 px bands, tapering to
+ * the tip, in the fern's green */
 static void leaf_glyph(uint16_t *fb, int stride, int cx, int y_bot, int h, uint32_t rgb) {
     for (int i = 0; i < h; i++) {
         float u = i / (float)(h - 1);
-        float half = 0.6f + 4.4f * (u < 0.4f ? u / 0.4f : (1 - u) / 0.6f);
+        float half = 0.6f + ((i / 2) & 1 ? 3.8f : 1.4f) * (1 - u) * (u < 0.12f ? u / 0.12f : 1);
         int w = (int)(half * 2 + 0.5f); if (w < 1) w = 1;
         render_rect(fb, stride, cx - w / 2, y_bot - i, w, 1, rgb);
     }
@@ -513,7 +514,7 @@ static void castle_glyph(uint16_t *fb, int stride, int cx, int y_bot, uint32_t w
  * FRONT: the leaves, the castle over them (its depths mean the plant layer) */
 static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int z, int item, float clock) {
     const int cx = x + w / 2, cy = y + h / 2, lh = h - 6, yb = y + h - 3;
-    const uint32_t la = 0x8dbb48, lb = 0x6c9d38;
+    const uint32_t la = 0x4f9a52, lb = 0x3e8546;     /* the tall fern's greens */
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
     if (item == 2) {
         if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);

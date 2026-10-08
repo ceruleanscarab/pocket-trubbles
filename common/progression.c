@@ -27,7 +27,7 @@ const char *const MS_NAMES[MS_FISH_COUNT] = {
 const char *const TMS_NAMES[TMS_COUNT] = {
     "a pair", "a trio", "a quartet", "a quintet", "a sextet",
     "first full night's sleep", "first play session", "the pod changed someone", "first feeding",
-    "first trimming", "first glass cleaning",   /* the pod's front glass, not the starfield viewport */ "a school of ten shrimp",
+    "first trimming", "first glass cleaning",   /* the pod's front glass, not the starfield viewport */ "a colony of ten mites",
     "first visit to the reef",
 };
 
@@ -302,13 +302,13 @@ void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t);
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
 const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
-    { SD_ITEM_PLANT, "SWORD PLANT", "BROAD, VERTICAL LEAVES", "MORE COVER FOR YOUR CRITTERS", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
-    { SD_ITEM_SNAIL, "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_SNAIL },
+    { SD_ITEM_PLANT, "TALL FERN", "FEATHERY, TALL FRONDS", "MORE COVER FOR YOUR TRUBBLES", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
+    { SD_ITEM_SNAIL, "CLEANING BOT", "SCRUBS THE GLASS CLEAN,",  "EVEN WHILE THE POD SLEEPS",   SD_PRICE_SNAIL },
     { SD_ITEM_CASTLE, "CASTLE",     "STONE TOWERS AND AN ARCH",  "THE FISH SWIM THROUGH IT",    SD_PRICE_CASTLE },   /* 2026-09-16 */
     { SD_ITEM_CORAL,  "CORAL",      "A BRANCHING REEF CORAL,",   "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
     { SD_ITEM_CLUSTER, "REEF CLUSTER", "A MATURE REEF ON A ROCK,", "FILLS OUT, THEN IT BLOOMS",  SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
-    { SD_ITEM_SHRIMP,  "SHRIMP",    "A SCHOOL OF CHERRY SHRIMP", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
-    { SD_ITEM_URCHIN,  "SEA URCHIN", "NIBBLES THE TALL GRASS,",  "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    { SD_ITEM_SHRIMP,  "CRUMB MITES", "A COLONY OF CRUMB MITES", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
+    { SD_ITEM_URCHIN,  "MOWING BOT", "TRIMS THE TALL MOSS,",     "EVEN WHILE THE POD SLEEPS",   SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
