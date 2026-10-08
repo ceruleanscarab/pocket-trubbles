@@ -236,84 +236,78 @@ static int selftest(void) {
     return distinct >= 5 ? 0 : 1;                 /* a live tank uses most goals */
 }
 
-/* the spawning (2026-09-24, Strato: "new fry comes at next light on" felt
- * unintuitive): a staged fry is born on its own - a few seconds after its
- * last gate the parents swim down into the nursery grass and court, then the
- * fry comes, between them. The light has no say (leg A runs in the dark); a
- * page over the tank holds it (B); a tank put to sleep first has it at the
- * wake - a deep sleep (C) or the grace's quick wake (D). Runs on the test
- * save the setup leg left: a pair, nothing staged. */
+/* budding's arrival (Trubbles, 2026-10-08; it replaces the spawning): a
+ * staged bud comes a little after its last gate - SPAWN_WAIT_MIN_S..MAX_S of
+ * lit awake seconds - beside its parent, the content fluff, at a calm moment.
+ * The dark holds it (the keeper should see it: leg A), so does a page over
+ * the pod (B); a pod put to sleep first has it at the wake - a deep sleep (C)
+ * or the grace's quick wake (D). Runs on the test save the setup leg left. */
 /* Every leg boots THAT save, put back first (2026-10-01): a leg's staging
  * rides in the file once a coalesced save lands mid-leg and the next boot
- * delivers it, so the legs used to hand each other a fish or not by timing -
- * and on the watch, where the grass is a longer swim, all three did and the
- * last leg found the tank full. */
+ * delivers it, so the legs would hand each other a Trubble or not by timing. */
 static uint8_t s_spawn_sav[4096]; static size_t s_spawn_sav_n;
 static int spawn_prep(uint32_t seed) {
     if (s_spawn_sav_n) persist_port_save(s_spawn_sav, s_spawn_sav_n);
     tank_init(&tank, seed); progression_boot(&tank);
-    for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].hunger = 2; tank.fish[i].energy = 8; }
-    tank_veg_set(&tank, 0, 0.6f);                 /* a nursery, whatever the save grew */
+    for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].hunger = 2; tank.fish[i].energy = 8; tank.fish[i].stress = 0; tank.fish[i].content = 9; }
+    progression_set_age(&tank, 0, STAGE_ADULT_AGE + 1);   /* a fluff to bud from */
+    progression_set_bud(0, BUD_CONTENT_S);
     progression_stage_arrival(&tank);
     return tank.n_fish;
 }
+static void bud_tick(int n) {
+    for (int i = 0; i < n; i++) {
+        tank_tick(&tank, 1.0f / 60.0f, advisor_rules); progression_tick(&tank, 1.0f / 60.0f);
+        for (int k = 0; k < tank.n_fish; k++) { tank.fish[k].hunger = 2; tank.fish[k].stress = 0; }   /* calm and fed throughout */
+    }
+}
 static int selftest_spawn(void) {
     const float DT = 1.0f / 60.0f;
-    if (!persist_port_load(s_spawn_sav, sizeof s_spawn_sav, &s_spawn_sav_n)) { printf("FAIL: the setup leg left no save for the spawning legs\n"); return 1; }
-    /* A: in the dark, nobody touching it */
+    if (!persist_port_load(s_spawn_sav, sizeof s_spawn_sav, &s_spawn_sav_n)) { printf("FAIL: the setup leg left no save for the budding legs\n"); return 1; }
+    /* A: in the dark it waits; the light on, the bud comes beside its parent */
     int n0 = spawn_prep(40);
     tank.light_auto = false; tank.light_manual_off = true;   /* the keeper turned the light off */
-    float t_spawn = -1, t_in = -1, t_born = -1; int pa = -1, pb = -1;
-    for (int i = 0; i < 60 * 120 && t_born < 0; i++) {
-        tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT);
-        if (!tank.night) { printf("FAIL: the light came on by itself\n"); return 1; }
-        if (tank.spawning && t_spawn < 0) { t_spawn = i * DT; pa = tank.court_a; pb = tank.court_b; }
-        if (tank.spawning && tank.spawn_danced > 0 && t_in < 0) t_in = i * DT;
-        if (tank.n_fish != n0) t_born = i * DT;
-    }
-    printf("selftest-pop: spawning in the dark: the pair set off at %.1f s, in the grass at %.1f s, the fry at %.1f s\n", t_spawn, t_in, t_born);
-    if (t_born < 0) { printf("FAIL: no fry within 2 min of the staging\n"); return 1; }
-    if (t_spawn < SPAWN_WAIT_MIN_S - DT || t_spawn > SPAWN_WAIT_MAX_S + DT) { printf("FAIL: the courtship started at %.1f s, not %.0f..%.0f\n", t_spawn, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S); return 1; }
-    if (t_in < 0 || t_in > 30) { printf("FAIL: the pair was not courting in the grass within 30 s (%.1f)\n", t_in); return 1; }
-    if (t_born - t_in < SPAWN_DANCE_S - DT) { printf("FAIL: the fry came %.1f s into the dance, before SPAWN_DANCE_S\n", t_born - t_in); return 1; }
+    bud_tick(60 * 60);
+    if (tank.n_fish != n0 || !progression_arrival_pending()) { printf("FAIL: a bud came in the dark (or the staging was lost)\n"); return 1; }
+    tank.light_manual_off = false;
+    int i = 0;
+    for (; i < 60 * 60 && tank.n_fish == n0; i++) bud_tick(1);
+    float t_born = i * DT;
+    printf("selftest-pop: budding: held 60 s in the dark; the light on, the pip came %.1f s later\n", t_born);
+    if (tank.n_fish != n0 + 1) { printf("FAIL: no bud within 60 s of the light\n"); return 1; }
+    if (t_born < SPAWN_WAIT_MIN_S - DT || t_born > SPAWN_WAIT_MAX_S + DT) { printf("FAIL: the bud came at %.1f s, not %.0f..%.0f\n", t_born, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S); return 1; }
     {
-        const fish_t *f = &tank.fish[tank.n_fish - 1];
-        int b = tank_nursery_bed(&tank); float x0, x1; tank_veg_bed(&tank, b, &x0, &x1, NULL, NULL);
-        bool parents = (f->parent_a == pa && f->parent_b == pb) || (f->parent_a == pb && f->parent_b == pa);
-        if (!parents) { printf("FAIL: the fry's parents %d/%d are not the courting pair %d/%d\n", f->parent_a, f->parent_b, pa, pb); return 1; }
-        if (f->x < x0 || f->x > x1) { printf("FAIL: the fry was born at x %.0f, outside the nursery %.0f..%.0f\n", f->x, x0, x1); return 1; }
-        if (progression_newborn() != tank.n_fish - 1 || progression_arrival_pending() || tank.spawning) { printf("FAIL: the birth left the debt / staging wrong\n"); return 1; }
+        const fish_t *f = &tank.fish[tank.n_fish - 1], *p = &tank.fish[0];
+        if (f->parent_a != 0 || f->parent_b != 0) { printf("FAIL: the pip's parents %d/%d are not the fluff 0/0\n", f->parent_a, f->parent_b); return 1; }
+        if (fabsf(f->x - p->x) > 3 * TRUB_R * (f->size + p->size)) { printf("FAIL: the pip came at x %.0f, not beside its parent at %.0f\n", f->x, p->x); return 1; }
+        if (f->stage != STAGE_FRY) { printf("FAIL: the bud is not a pip (stage %d)\n", f->stage); return 1; }
+        if (progression_bud_s(0) > 1.0f) { printf("FAIL: the parent kept its banked content (%.0f s)\n", progression_bud_s(0)); return 1; }
+        if (progression_newborn() != tank.n_fish - 1 || progression_arrival_pending()) { printf("FAIL: the bud left the debt / staging wrong\n"); return 1; }
     }
-    /* B: a page over the tank holds it, even mid-dance; the page gone, it resumes */
+    /* B: a page over the pod holds it; the page gone, it comes */
     n0 = spawn_prep(41);
     tank.ui_cover = true;
-    for (int i = 0; i < 60 * 60; i++) { tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT); }
-    if (tank.n_fish != n0 || tank.spawning) { printf("FAIL: the fry came (or the pair courted) under a page\n"); return 1; }
+    bud_tick(60 * 60);
+    if (tank.n_fish != n0) { printf("FAIL: a bud came under a page\n"); return 1; }
     tank.ui_cover = false;
-    int i = 0;
-    for (; i < 60 * 120 && !(tank.spawning && tank.spawn_danced > 2); i++) { tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT); }
-    tank.ui_cover = true;                          /* the keeper opens the milestones mid-dance */
-    tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT);
-    if (tank.spawning || tank.n_fish != n0) { printf("FAIL: the dance went on under a page\n"); return 1; }
-    tank.ui_cover = false;
-    for (i = 0; i < 60 * 120 && tank.n_fish == n0; i++) { tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT); }
-    printf("selftest-pop: a page held the spawning 60 s and cut a dance short; closed, the fry came %.1f s later\n", i * DT);
-    if (tank.n_fish != n0 + 1) { printf("FAIL: no fry after the page closed\n"); return 1; }
-    /* C: the tank goes to sleep mid-dance; the deep-sleep wake has the fry at once */
+    for (i = 0; i < 60 * 60 && tank.n_fish == n0; i++) bud_tick(1);
+    printf("selftest-pop: a page held the bud 60 s; closed, the pip came %.1f s later\n", i * DT);
+    if (tank.n_fish != n0 + 1) { printf("FAIL: no bud after the page closed\n"); return 1; }
+    /* C: staged, then the pod sleeps; the deep-sleep wake has the pip at once */
     n0 = spawn_prep(42);
-    for (i = 0; i < 60 * 120 && !tank.spawning; i++) { tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT); }
-    if (!tank.spawning) { printf("FAIL: no courtship to interrupt\n"); return 1; }
+    bud_tick(60 * 3);
+    if (tank.n_fish != n0) { printf("FAIL: the bud came before the wait (%d fish)\n", tank.n_fish); return 1; }
     progression_save(&tank);                       /* the sleep key saves */
     tank_init(&tank, 43);
     progression_wake(&tank, clock_port_now_unix() + 2 * 3600);
-    if (tank.n_fish != n0 + 1 || progression_newborn() != n0 || progression_arrival_pending()) { printf("FAIL: the wake did not deliver the fry (%d fish, owed %d)\n", tank.n_fish, progression_newborn()); return 1; }
+    if (tank.n_fish != n0 + 1 || progression_newborn() != n0 || progression_arrival_pending()) { printf("FAIL: the wake did not deliver the pip (%d fish, owed %d)\n", tank.n_fish, progression_newborn()); return 1; }
     /* D: the grace's quick wake (resume in place) delivers it too */
     n0 = spawn_prep(44);
-    for (i = 0; i < 60 * 3; i++) { tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT); }
+    bud_tick(60 * 3);
     tank_tick_sleep(&tank, 45);
     progression_woke(&tank);
-    if (tank.n_fish != n0 + 1 || progression_arrival_pending()) { printf("FAIL: the quick wake did not deliver the fry\n"); return 1; }
-    printf("selftest-pop: slept before the birth: the fry is born at the wake (deep sleep and the quick wake)\n");
+    if (tank.n_fish != n0 + 1 || progression_arrival_pending()) { printf("FAIL: the quick wake did not deliver the pip\n"); return 1; }
+    printf("selftest-pop: slept before the bud: the pip comes at the wake (deep sleep and the quick wake)\n");
     return 0;
 }
 
@@ -329,27 +323,35 @@ static int selftest_pop(void) {
     print_roster(&tank);
     if (tank.n_fish != N_FISH_START) { printf("FAIL: new tank should start with %d\n", N_FISH_START); return 1; }
     if (!progression_setup_pending()) { printf("FAIL: a new tank should owe the first-run setup\n"); return 1; }
-    /* the new-fry checklist (2026-09-14) reads the same gates: a fresh pair
-       owes trust, meals and a hold, and has the default garden's nursery */
-    pod_of_two();                                 /* (the gates are a pair's: a pod of one has none yet) */
+    /* the new-pip checklist reads the same gates: a fresh pod of one owes
+       trust, meals and a hold, has clean glass, and has no fluff to bud
+       from yet (Trubbles: budding - no nursery bed, a CONTENT gate) */
     {
         fry_req_t req[FRY_REQ_MAX]; bool staged;
         int n = progression_next_fry(&tank, req, &staged);
-        if (n != 5 || staged) { printf("FAIL: a new pair should list 5 fry gates, none staged (%d, %d)\n", n, staged); return 1; }
+        if (n != 5 || staged) { printf("FAIL: a new pod should list 5 bud gates, none staged (%d, %d)\n", n, staged); return 1; }
         int met = 0; for (int i = 0; i < n; i++) met += req[i].met;
-        if (req[0].kind != FRY_REQ_TRUST || req[1].kind != FRY_REQ_FEED || req[2].kind != FRY_REQ_HOLD || req[3].kind != FRY_REQ_GLASS || req[4].kind != FRY_REQ_GRASS
-            || met != 2 || !req[3].met || !req[4].met) { printf("FAIL: a fresh pair's gates: %d met, glass %d, grass %d\n", met, req[3].met, req[4].met); return 1; }
-        printf("selftest-pop: fry checklist: %d gates (%s / %s / %s / %s / %s)\n", n, req[0].progress, req[1].progress, req[2].progress, req[3].progress, req[4].progress);
+        if (req[0].kind != FRY_REQ_TRUST || req[1].kind != FRY_REQ_FEED || req[2].kind != FRY_REQ_HOLD || req[3].kind != FRY_REQ_GLASS || req[4].kind != FRY_REQ_CONTENT
+            || met != 1 || !req[3].met || req[4].met || strcmp(req[4].progress, "NO FLUFF YET")) {
+            printf("FAIL: a fresh pod's gates: %d met, glass %d, content %d '%s'\n", met, req[3].met, req[4].met, req[4].progress); return 1; }
+        printf("selftest-pop: bud checklist: %d gates (%s / %s / %s / %s / %s)\n", n, req[0].progress, req[1].progress, req[2].progress, req[3].progress, req[4].progress);
         tank.player_feedings = 12; progression_next_fry(&tank, req, &staged);
         if (!req[1].met || strcmp(req[1].progress, "DONE") || req[1].frac != 1.0f) { printf("FAIL: 12 feedings should meet the MEALS gate (%s)\n", req[1].progress); return 1; }
         tank.player_feedings = 3; progression_next_fry(&tank, req, &staged);
         if (req[1].met || req[1].frac < 0.24f || req[1].frac > 0.26f) { printf("FAIL: 3 of 12 feedings should be a quarter (%.2f)\n", req[1].frac); return 1; }
         tank.player_feedings = 0;
-        float g0 = tank.veg_growth[0], g1 = tank.veg_growth[1], g2 = tank.veg_growth[2];
-        tank_veg_set(&tank, 0, VEG_NUB); tank_veg_set(&tank, 1, VEG_NUB); tank_veg_set(&tank, 2, VEG_NUB);
+        /* the CONTENT gate (Trubbles): a fluff's banked content time, the bar
+           filling with it; a pip has none to bank */
+        progression_set_age(&tank, 0, STAGE_ADULT_AGE + 1);
+        progression_set_bud(0, BUD_CONTENT_S * 0.5f);
         progression_next_fry(&tank, req, &staged);
-        if (req[4].met || req[4].frac >= 1.0f) { printf("FAIL: scalped beds should leave the GRASS gate owed (%s)\n", req[4].progress); return 1; }
-        tank_veg_set(&tank, 0, g0); tank_veg_set(&tank, 1, g1); tank_veg_set(&tank, 2, g2);
+        { char want[28]; snprintf(want, sizeof want, "%d OF %d MIN", (int)(BUD_CONTENT_S * 0.5f) / 60, (int)BUD_CONTENT_S / 60);
+          if (req[4].met || req[4].frac < 0.49f || req[4].frac > 0.51f || strcmp(req[4].progress, want)) {
+              printf("FAIL: a fluff with half its content banked: '%s' (%.2f), want '%s'\n", req[4].progress, req[4].frac, want); return 1; } }
+        progression_set_bud(0, BUD_CONTENT_S);
+        progression_next_fry(&tank, req, &staged);
+        if (!req[4].met || strcmp(req[4].progress, "DONE")) { printf("FAIL: a fully banked fluff should meet CONTENT (%s)\n", req[4].progress); return 1; }
+        progression_set_bud(0, 0); progression_set_age(&tank, 0, 0);
         /* the GLASS gate (2026-09-16): a dirty tank - film on more than
            ALGAE_DIRTY of the glass - holds the fry; wiping it back under
            frees it. The bar fills as the film comes off. */
@@ -357,7 +359,7 @@ static int selftest_pop(void) {
         progression_next_fry(&tank, req, &staged);
         if (req[3].met || req[3].frac < 0.98f) { printf("FAIL: film just over ALGAE_DIRTY should leave GLASS owed, bar nearly full (%d, %.2f)\n", req[3].met, req[3].frac); return 1; }
         int met_dirty = 0; for (int i = 0; i < n; i++) met_dirty += req[i].met;
-        if (met_dirty != 1) { printf("FAIL: a dirty tank should meet only GRASS (%d met)\n", met_dirty); return 1; }
+        if (met_dirty != 0) { printf("FAIL: a dirty pod should meet nothing yet (%d met)\n", met_dirty); return 1; }
         for (int i = 0; i < ALGAE_CELLS; i++) tank.algae[i] = 0;
         tank_grow_algae(&tank, 2000);                                       /* an untended tank: up to the growth cap */
         progression_next_fry(&tank, req, &staged);
@@ -371,8 +373,10 @@ static int selftest_pop(void) {
     }
     progression_time_scale = 600;                 /* 10 minutes of tended time per second */
     int arrivals = 0, last_n = tank.n_fish;
-    bool saw_court = false;                       /* the tell fires before the fry */
-    bool saw_spawn = false;                       /* ... and the fry comes out of the spawning */
+    /* (Trubbles) the real thing: a LONE Trubble, tended, grows into a fluff,
+       banks content and buds - reachable with an attentive keeper's care */
+    bool saw_banked = false;                      /* a fluff banked its full content time before the bud */
+    int bud_parent = -1;
     float hold_x = 0, hold_y = 0;
     /* up to 20 sim-minutes: the gates close in a few and the fry is born
        seconds later, after the pair courts in the grass (the spawning,
@@ -389,8 +393,8 @@ static int selftest_pop(void) {
                                            hold_x = tank.fish[0].x < TANK_W / 2 ? tank_glass_x1(hold_y) - 80 : tank_glass_x0(hold_y) + 80; }
         if (tending && i % 600 < 480) tank_touch_hold(&tank, hold_x, hold_y);   /* 8 s across the tank, 2 s off */
         progression_tick(&tank, 1.0f / 60.0f);
-        saw_court |= (tank.courting && arrivals == 0);
-        saw_spawn |= (tank.spawning && arrivals == 0);
+        if (arrivals == 0) { int p = progression_bud_parent(&tank);
+            if (p >= 0 && progression_bud_s(p) >= BUD_CONTENT_S) { saw_banked = true; bud_parent = p; } }
         if (tank.n_fish != last_n) {
             printf("  t=%.0fs arrival: %s (%s) bold %.2f social %.2f -> %d fish\n", tank.clock,
                    tank.fish[tank.n_fish - 1].name, STAGE_NAMES[tank.fish[tank.n_fish - 1].stage],
@@ -398,21 +402,22 @@ static int selftest_pop(void) {
             last_n = tank.n_fish; arrivals++;
         }
     }
-    printf("selftest-pop: %d arrivals, %d fish, feedings %d, hold-approaches %d, pending %d, courted %d\n",
-           arrivals, tank.n_fish, tank.player_feedings, tank.hold_approaches, progression_arrival_pending(), saw_court);
-    if (arrivals > 0 && !saw_court) { printf("FAIL: no courtship tell before the first arrival\n"); return 1; }
-    if (arrivals > 0 && !saw_spawn) { printf("FAIL: the first fry was born without the spawning\n"); return 1; }
+    printf("selftest-pop: %d arrivals, %d Trubbles, feedings %d, hold-approaches %d, pending %d, banked %d\n",
+           arrivals, tank.n_fish, tank.player_feedings, tank.hold_approaches, progression_arrival_pending(), saw_banked);
+    if (arrivals > 0 && !saw_banked) { printf("FAIL: a bud came without a fluff banking its content\n"); return 1; }
+    if (arrivals > 0 && (tank.fish[1].parent_a != bud_parent || tank.fish[1].parent_b != bud_parent)) {
+        printf("FAIL: the first pip's parents %d/%d, not the content fluff %d\n", tank.fish[1].parent_a, tank.fish[1].parent_b, bud_parent); return 1; }
     for (int i = 0; i < tank.n_fish; i++)
         printf("  %-5s %s age %.0fh size %.2f ms 0x%03x trust %.1f\n", tank.fish[i].name,
                STAGE_NAMES[tank.fish[i].stage], progression_age_s(&tank, i) / 3600, tank.fish[i].size,
                tank.fish[i].ms_bits, tank.fish[i].trust);
     printf("  tank ms 0x%03x\n", tank.tank_ms_bits);
     if (arrivals < 1) { printf("FAIL: no arrival earned by an attentive keeper\n"); return 1; }
-    {   /* the checklist follows the population: a full tank lists nothing,
-           a growing one lists the next arrival's gates + grass */
+    {   /* the checklist follows the population: a full pod lists nothing,
+           a growing one lists the next bud's gates, then the glass and a content fluff */
         fry_req_t req[FRY_REQ_MAX];
         int n = progression_next_fry(&tank, req, NULL);
-        if (tank.n_fish >= POP_CAP ? n != 0 : (n < 4 || req[n - 2].kind != FRY_REQ_GLASS || req[n - 1].kind != FRY_REQ_GRASS)) {
+        if (tank.n_fish >= POP_CAP ? n != 0 : (n < 4 || req[n - 2].kind != FRY_REQ_GLASS || req[n - 1].kind != FRY_REQ_CONTENT)) {
             printf("FAIL: checklist lists %d gates at %d fish\n", n, tank.n_fish); return 1; }
         if (n > 0) {   /* and the page draws it: the row, the name's tally, the first gate's modal */
             static uint16_t fb[TANK_W * TANK_H];
@@ -4256,6 +4261,7 @@ static int selftest_card(const char *prefix) {
     progression_set_age(&tank, 3, STAGE_ADULT_AGE + 60);
     for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].trust = 9; tank.fish[i].hunger = 2; }
     memset(tank.algae, 0, sizeof tank.algae);
+    progression_set_bud(0, BUD_CONTENT_S);                    /* (Trubbles) a content fluff to bud from */
     {
         fry_req_t req[FRY_REQ_MAX]; bool staged; int n = progression_next_fry(&tank, req, &staged), feed = -1, met = 0;
         for (int i = 0; i < n; i++) { if (req[i].kind == FRY_REQ_FEED) feed = i; met += req[i].met; }
@@ -4274,6 +4280,8 @@ static int selftest_card(const char *prefix) {
     if (tank.fish[3].parent_a != -1 || tank.fish[3].parent_b != 2) CARD_FAIL("the reload lost the moved parents (%d/%d)", tank.fish[3].parent_a, tank.fish[3].parent_b);
     for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].trust = 9; tank.fish[i].hunger = 2; }
     memset(tank.algae, 0, sizeof tank.algae); for (int b = 0; b < VEG_BEDS; b++) tank_veg_set(&tank, b, 0.8f);
+    for (int i = 0; i < tank.n_fish; i++) tank.fish[i].content = 9;   /* (Trubbles) a content fluff, banked: */
+    progression_set_bud(0, BUD_CONTENT_S);                              /* the bank is not saved yet */
     tank.player_feedings = 150 + SELL_FRY_MEALS - 1;
     progression_tick(&tank, DT);
     if (progression_arrival_pending()) CARD_FAIL("the meals owed since the sale did not survive the save");

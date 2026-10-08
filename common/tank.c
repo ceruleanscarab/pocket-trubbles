@@ -24,7 +24,9 @@ static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
 void tank_emit(int ev, int fish) { if (s_ev_fn) s_ev_fn(ev, fish, s_ev_ud); }
 
-const char *const STAGE_NAMES[4] = { "fry", "juv", "adult", "elder" };
+/* the Trubbles stage tokens (trubbles_schema.md: pip | tuft | fluff) over
+ * the four life stages the engine keeps: an elder is an old fluff */
+const char *const STAGE_NAMES[4] = { "pip", "tuft", "fluff", "fluff" };
 const char *const TRAINED_NAMES[N_TRAINED_NAMES] = { "mira", "bolt", "kelp", "nori" };
 
 int tank_reflex_overrides = 0;   /* starvation-ignored episodes (diagnostic) */

@@ -149,8 +149,21 @@ void progression_ack_milestones(tank_t *t);
  * progress phrase (where it stands), a 0..1 fraction and whether it is met. Returns the count, 0 at the
  * population cap. *staged = every gate is met and the fry is on its way
  * (the spawning). Strings fit the pixel font: <= 25 chars at scale 2. */
-enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, FRY_REQ_GRASS, FRY_REQ_GLASS };
+enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, FRY_REQ_GRASS, FRY_REQ_GLASS,
+       FRY_REQ_CONTENT };
 #define FRY_REQ_MAX 5
+/* budding (Trubbles, 2026-10-08; trubbles_schema.md: "sustained high
+ * content in a full fluff triggers budding"). A new Trubble buds from one
+ * parent, not a pair: a fluff (adult or elder) banks lit seconds at content
+ * >= BUD_CONTENT, losing them at BUD_DRAIN of the rate below it, and
+ * BUD_CONTENT_S banked is the CONTENT care gate. The fluff with the most is
+ * the parent. Not saved yet: a boot starts the count over. */
+#define BUD_CONTENT    8.0f
+#define BUD_CONTENT_S  600.0f
+#define BUD_DRAIN      0.25f
+float progression_bud_s(int idx);           /* seconds banked by Trubble idx */
+int   progression_bud_parent(const tank_t *t);   /* the fluff with the most banked, or -1 */
+void  progression_set_bud(int idx, float seconds);   /* director / tests */
 typedef struct {
     int   kind;
     char  title[12];
