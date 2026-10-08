@@ -275,7 +275,11 @@ static int selftest_spawn(void) {
     float t_born = i * DT;
     printf("selftest-pop: budding: held 60 s in the dark; the light on, the pip came %.1f s later\n", t_born);
     if (tank.n_fish != n0 + 1) { printf("FAIL: no bud within 60 s of the light\n"); return 1; }
-    if (t_born < SPAWN_WAIT_MIN_S - DT || t_born > SPAWN_WAIT_MAX_S + DT) { printf("FAIL: the bud came at %.1f s, not %.0f..%.0f\n", t_born, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S); return 1; }
+    /* the wait, then the moment: the pip is out BUD_SPLIT_S after it starts */
+    if (t_born < SPAWN_WAIT_MIN_S + BUD_SPLIT_S - DT || t_born > SPAWN_WAIT_MAX_S + BUD_SPLIT_S + 2) {
+        printf("FAIL: the bud came at %.1f s, not %.0f..%.0f\n", t_born, SPAWN_WAIT_MIN_S + BUD_SPLIT_S, SPAWN_WAIT_MAX_S + BUD_SPLIT_S); return 1; }
+    if (tank.bud_parent != 0 || !tank.bud_split) { printf("FAIL: the pip came outside a budding moment (parent %d, split %d)\n", tank.bud_parent, tank.bud_split); return 1; }
+    if (tank.fish[tank.n_fish - 1].perch != PERCH_AIR || tank.fish[tank.n_fish - 1].vy > -100) { printf("FAIL: the pip did not hop out of the lump\n"); return 1; }
     {
         const fish_t *f = &tank.fish[tank.n_fish - 1], *p = &tank.fish[0];
         if (f->parent_a != 0 || f->parent_b != 0) { printf("FAIL: the pip's parents %d/%d are not the fluff 0/0\n", f->parent_a, f->parent_b); return 1; }
@@ -284,6 +288,8 @@ static int selftest_spawn(void) {
         if (progression_bud_s(0) > 1.0f) { printf("FAIL: the parent kept its banked content (%.0f s)\n", progression_bud_s(0)); return 1; }
         if (progression_newborn() != tank.n_fish - 1 || progression_arrival_pending()) { printf("FAIL: the bud left the debt / staging wrong\n"); return 1; }
     }
+    bud_tick(60 * 2);
+    if (tank.bud_parent != -1) { printf("FAIL: the budding moment did not end\n"); return 1; }
     /* B: a page over the pod holds it; the page gone, it comes */
     n0 = spawn_prep(41);
     tank.ui_cover = true;
@@ -378,9 +384,8 @@ static int selftest_pop(void) {
     bool saw_banked = false;                      /* a fluff banked its full content time before the bud */
     int bud_parent = -1;
     float hold_x = 0, hold_y = 0;
-    /* up to 20 sim-minutes: the gates close in a few and the fry is born
-       seconds later, after the pair courts in the grass (the spawning,
-       2026-09-24 - it used to wait for the next light-on). The keeper here
+    /* up to 20 sim-minutes: the gates close in a few and the pip buds
+       seconds later, at a calm lit moment (Trubbles budding). The keeper here
        tends for 30 s and leaves it alone for 30 s, lights-out opted in, so
        the birth may land lit or dark */
     tank.light_auto = true;                       /* this keeper opted into lights-out (the default is MANUAL) */
@@ -4254,7 +4259,7 @@ static int selftest_card(const char *prefix) {
         CARD_FAIL("the parents' slots: eli %d/%d, dee %d/%d", tank.fish[3].parent_a, tank.fish[3].parent_b, tank.fish[2].parent_a, tank.fish[2].parent_b);
     if (fabsf(tank.fish[2].rest_dx - (rest3 - 24)) > 1e-3f) CARD_FAIL("dee's spot by the reef did not move a slot nearer");
     if (tank.roster_gen == gen0) CARD_FAIL("the roster's generation did not tick");
-    if (progression_arrival_pending() || tank.spawning) CARD_FAIL("the staged fry was not called off by the sale");
+    if (progression_arrival_pending() || tank.bud_parent >= 0) CARD_FAIL("the staged bud was not called off by the sale");
     printf("selftest-card: SELL: armed by one tap, a doubled tap refused, the second sold bo for %d; slots, clocks, ledger and parents moved down\n", SD_FISH_ADULT);
 
     /* the slot is earned again: every other gate met, the fry still waits for SELL_FRY_MEALS meals */

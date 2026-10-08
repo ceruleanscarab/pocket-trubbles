@@ -537,23 +537,23 @@ typedef struct tank {
     float    greet_timer;          /* light-on greeting: trusting fish come up front */
     float    keeper_s;             /* seconds since the keeper last touched the glass (schema `keeper`) */
     float    keeper_x;             /* ... and where */
-    /* courtship tell (progression.c decides, tank.c performs): when the tank
-     * is one care-condition away from earning an arrival - or one is already
-     * staged - the two most-trusting grown fish occasionally circle together
-     * near the reef. "Something is close", said in fish. */
-    bool     courting;
-    int8_t   court_a, court_b;     /* the parents-to-be (-1 = fewer than 2 grown fish) */
-    float    court_cool;           /* seconds until the next courtship episode */
-    float    court_active;         /* seconds left of the current episode */
-    /* the spawning (2026-09-24): a staged arrival is born in front of the
-     * keeper, not at a light-on. progression.c waits a few awake seconds,
-     * then sets `spawning`: the courting pair dives into the nursery grass
-     * and circles there with no episode clock; tank.c counts `spawn_danced`,
-     * the seconds both have spent circling in the fronds, and progression.c
-     * delivers the fry at SPAWN_DANCE_S. Not saved (a staged arrival is; a
-     * wake delivers it at once). */
-    bool     spawning;
-    float    spawn_danced;
+    /* budding (Trubbles, 2026-10-08; it replaced the courtship and the
+     * spawning). progression.c decides, tank.c performs, render.c draws.
+     * The tell: while the pod is one care gate short of a bud - or one is
+     * staged - the fluff that would bud now and then wobbles with a warm
+     * glow. "Something is close", said in fur. The moment: a staged bud, its
+     * wait done and the parent calm, sets bud_parent; tank.c holds the parent
+     * still and runs bud_t through BUD_MOMENT_S (paused under a page); at
+     * BUD_SPLIT_S progression.c brings the pip out where the lump was
+     * (tank_bud_lump). None of it is saved (a staged bud is; a wake delivers
+     * it at once). */
+    int8_t   bud_tell;             /* the fluff showing the tell, -1 = none */
+    float    bud_tell_t;           /* seconds left of the current wobble */
+    float    bud_tell_cool;        /* seconds until the next */
+    int8_t   bud_parent;           /* the fluff budding now, -1 = none */
+    int8_t   bud_dir;              /* the side the lump rises on: -1 left, +1 right */
+    bool     bud_split;            /* the pip is out (the parent settles until BUD_MOMENT_S) */
+    float    bud_t;                /* seconds into the moment */
     bool     ravenous;             /* starving tank: with empty water the fish
                                     * beg at the surface; the moment pellets
                                     * land they DASH for them (feeding frenzy).
@@ -632,8 +632,8 @@ int   tank_add_fish(tank_t *t, int parent_a, int parent_b);
  * after it move down a slot - the order stays the order of arrival, so the
  * last fish is still the youngest - and everything the tank keeps by slot
  * moves with them (the sand dollar ledger, the others' parent slots: a child
- * of the fish that left reads "none", their spots by the reef). The courtship
- * and a spawning under way are dropped; roster_gen ticks so an advisor can
+ * of the fish that left reads "none", their spots by the reef). A bud's
+ * tell and a budding under way are dropped; roster_gen ticks so an advisor can
  * drop a decision asked for the old slots. false = no such fish. The caller
  * (progression_sell_fish) keeps the rules: who may leave, and its own
  * per-slot state. */
@@ -758,8 +758,8 @@ void  tank_scatter_food(tank_t *t, int n);      /* the tank's own trickle (rando
 void  tank_veg_bed(const tank_t *t, int b, float *x0, float *x1, float *top_y, int *fronds);
 int   tank_veg_frond(const tank_t *t, int b, int i, float *x);
 void  tank_veg_set(tank_t *t, int b, float g);
-/* the tallest bed at VEG_NURSERY or better, -1 if none (progression gates
- * courtship and arrivals on it; tank.c stages the courtship there) */
+/* the tallest bed at VEG_NURSERY or better, -1 if none (the fish's
+ * nursery; budding needs none) */
 int   tank_nursery_bed(const tank_t *t);
 /* is (x, y) inside a SEAGRASS canopy with real cover (a bed past VEG_BARE;
  * the sword plant is no grass)? progression's MS_FIRST_GRASS asks */
@@ -771,8 +771,16 @@ bool  tank_in_grass(const tank_t *t, float x, float y);
  * stands. The fish circle REEF_ORBIT_UP above the point. */
 #define REEF_ORBIT_UP 35.0f
 void  tank_reef_spot(const tank_t *t, float *x, float *y);
-/* a flirt of n bubbles rising from where the pair courts (the nursery) */
-void  tank_court_puff(tank_t *t, int n);
+/* the budding moment's timeline, seconds (tank_t.bud_*) */
+#define BUD_SWELL_S   1.5f      /* the parent stops and swells */
+#define BUD_PINCH_S   4.5f      /* the lump has grown; its neck narrows */
+#define BUD_SPLIT_S   5.0f      /* the pip is out */
+#define BUD_MOMENT_S  6.0f      /* the parent settled: over */
+#define BUD_TELL_S    2.5f      /* one wobble of the tell */
+/* the lump on a budding parent: its centre, radius and the neck's
+ * half-width (0 = pinched off). false when nobody is budding or the pip is
+ * already out. render.c draws it, progression.c brings the pip out there. */
+bool  tank_bud_lump(const tank_t *t, float *x, float *y, float *r, float *neck);
 /* the share of the glass wearing film, 0..1 (cells with any algae over all
  * cells - what the keeper sees covered, not how thick). > ALGAE_DIRTY = a
  * dirty tank: the fry checklist's GLASS gate (progression.c) */

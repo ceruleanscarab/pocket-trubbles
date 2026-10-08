@@ -387,8 +387,7 @@ bool tank_remove_fish(tank_t *t, int idx) {
         if (f->parent_a == idx) f->parent_a = -1; else if (f->parent_a > idx) f->parent_a--;
         if (f->parent_b == idx) f->parent_b = -1; else if (f->parent_b > idx) f->parent_b--;
     }
-    t->courting = false; t->court_a = t->court_b = -1; t->court_active = 0;   /* progression picks the pair again */
-    t->spawning = false; t->spawn_danced = 0;
+    t->bud_tell = -1; t->bud_tell_t = 0; t->bud_parent = -1; t->bud_split = false; t->bud_t = 0;   /* progression picks the parent again */
     t->stage_fish = -1;
     t->roster_gen++;
     return true;
@@ -418,9 +417,9 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->startle_cooldown = 0;
     t->feed_spot_x = -1; t->player_feedings = 0; t->feed_open = false; t->hold_approaches = 0; t->greet_timer = 0;
     t->keeper_s = 99; t->keeper_x = TANK_W * 0.5f;
-    t->courting = false; t->court_a = t->court_b = -1;
-    t->court_cool = 30; t->court_active = 0;
-    t->spawning = false; t->spawn_danced = 0; t->ui_cover = false;
+    t->bud_tell = -1; t->bud_tell_t = 0; t->bud_tell_cool = 30;
+    t->bud_parent = -1; t->bud_dir = 1; t->bud_split = false; t->bud_t = 0;
+    t->ui_cover = false;
     t->ravenous = false; t->trickle_off = false;
     t->stage_fish = -1; t->hold_light = false;
     t->drag_active = false; t->drag_has_prev = false; t->drag_dist = 0;
@@ -464,7 +463,6 @@ void tank_init(tank_t *t, uint32_t seed) {
 #define HOLD_ATTRACT_S  2.7f    /* hold_time before fish approach; platforms
                                  * report holds ~0.3 s in, so ≈3 s of contact */
 #define HOLD_HUNGER_VETO 7.5f   /* this hungry, a fish ignores the finger */
-#define SPAWN_NEAR_PX   20.0f   /* past the courtship loop's reach: a parent this close is circling in the fronds */
 #define HOLD_APPROACH_FROM 60.0f /* a hold-approach must START at least this far out:
                                  * a fish already under the finger earns nothing */
 #define HOLD_APPROACH_AT   30.0f /* ... and come in this close */
@@ -623,34 +621,20 @@ int tank_nursery_bed(const tank_t *t) {
         if (t->veg_growth[b] >= VEG_NURSERY && (best < 0 || t->veg_growth[b] > t->veg_growth[best])) best = b;
     return best;
 }
-/* where the pair circles: low inside the nursery bed, a flat loop that weaves
- * the fronds (body centre ~14 px off the floor line) */
-static void court_site(const tank_t *t, float *cx, float *cy, float *rx) {
-    int b = tank_nursery_bed(t);
-    if (b < 0) { *cx = t->reef_x + 26; *cy = TANK_BOT - 78; *rx = 26; return; }   /* legacy spot */
-    float x0, x1; tank_veg_bed(t, b, &x0, &x1, NULL, NULL);
-    *cx = (x0 + x1) * 0.5f; *cy = TANK_BOT - 16 - 14;
-    float half = (x1 - x0) * 0.5f - 8; *rx = half < 16 ? 16 : half > 30 ? 30 : half;
-}
-void tank_court_puff(tank_t *t, int n) {
-    float sx, sy, sr; court_site(t, &sx, &sy, &sr);
-    for (int i = 0; i < MAX_BUBBLE && n > 0; i++) {
-        if (t->bubble[i].column) continue;
-        t->bubble[i].x = sx + tank_randf(t, -10, 10);
-        t->bubble[i].y = sy - 6;
-        n--;
-    }
-}
-/* the courtship circle, shared by the tell's episodes and the spawning: the
- * pair weaves a low loop through the nursery on opposite sides - performed
- * rather than printed (reflex presentation; the advisor still owns both
- * goals). Down in the fronds, not mid-water: Strato (2026-09-04) - by the
- * reef it read as two friends at the bubbles. */
-static void court_steer(const tank_t *t, const fish_t *f, int idx, float *px, float *py, float *speed) {
-    float ph = t->clock * 1.7f + (idx == t->court_b ? 3.14159f : 0);
-    float cx, cy, rx; court_site(t, &cx, &cy, &rx);
-    *px = cx + cosf(ph) * rx; *py = cy + sinf(ph) * 6;
-    *speed = tank_dist(f->x, f->y, cx, cy) > 90 ? 46 : 30;
+/* the budding lump (tank.h): it rises on the floor or shelf beside its
+ * parent, on the bud_dir side, growing from nothing at BUD_SWELL_S to about
+ * a pip's size at BUD_PINCH_S, then its neck narrows to nothing at the split */
+bool tank_bud_lump(const tank_t *t, float *x, float *y, float *r, float *neck) {
+    if (t->bud_parent < 0 || t->bud_parent >= t->n_fish || t->bud_split || t->bud_t < BUD_SWELL_S) return false;
+    const fish_t *f = &t->fish[t->bud_parent];
+    float R = TRUB_R * f->size;
+    float u = clampf((t->bud_t - BUD_SWELL_S) / (BUD_PINCH_S - BUD_SWELL_S), 0, 1);
+    *r = R * 0.58f * sqrtf(u);
+    *x = f->x + t->bud_dir * (R * 0.55f + *r * 1.25f);
+    *y = f->y + R - *r;                                  /* sitting on what the parent sits on */
+    float p = clampf((t->bud_t - BUD_PINCH_S) / (BUD_SPLIT_S - BUD_PINCH_S), 0, 1);
+    *neck = *r * 0.7f * (1 - p);
+    return true;
 }
 int tank_veg_frond(const tank_t *t, int b, int i, float *x) {
     float bx0; int n;
@@ -1634,30 +1618,20 @@ static void touch_tick(tank_t *t, float dt) {
         for (int i = 0; i < t->n_fish; i++) t->fish[i].hold_far = false;
     }
     if (t->greet_timer > 0) t->greet_timer -= dt;
-    /* courtship episodes: while progression says an arrival is close, the
-     * pair circles the reef for a few seconds every minute or so - frequent
-     * enough to notice across a couple of check-ins, rare enough to feel
-     * like something glimpsed rather than an indicator */
-    if (t->spawning && t->court_a >= 0 && t->court_b >= 0) {
-        /* the spawning (2026-09-24): no episode clock - the pair circles in
-         * the grass until the fry comes, lit or dark. The clock that counts
-         * is the time BOTH spend in the fronds (a parent still swimming down,
-         * or begging, holds it); the bubbles mark their arrival. */
-        float sx, sy, sr; court_site(t, &sx, &sy, &sr);
-        const fish_t *a = &t->fish[t->court_a], *b = &t->fish[t->court_b];
-        if (tank_dist(a->x, a->y, sx, sy) < sr + SPAWN_NEAR_PX && tank_dist(b->x, b->y, sx, sy) < sr + SPAWN_NEAR_PX) {
-            if (t->spawn_danced == 0) tank_court_puff(t, 2);
-            t->spawn_danced += dt;
+    /* budding (tank.h): the tell's wobbles - every minute or so while
+     * progression says a bud is close, lit, nobody budding - and the
+     * moment's clock, which a page over the pod holds */
+    if (t->bud_parent >= 0) {
+        t->bud_tell_t = 0;
+        if (!t->ui_cover) t->bud_t += dt;
+        if (t->bud_t >= BUD_MOMENT_S) { t->bud_parent = -1; t->bud_split = false; t->bud_t = 0; }
+    } else if (t->bud_tell >= 0 && !t->night) {
+        if (t->bud_tell_t > 0) t->bud_tell_t = fmaxf(0, t->bud_tell_t - dt);
+        else if ((t->bud_tell_cool -= dt) <= 0) {
+            t->bud_tell_t = BUD_TELL_S;
+            t->bud_tell_cool = tank_randf(t, 40, 90);
         }
-        t->court_active = 0;
-    } else if (t->courting && !t->night) {
-        if (t->court_active > 0) t->court_active -= dt;
-        else if ((t->court_cool -= dt) <= 0) {
-            t->court_active = tank_randf(t, 6, 9);
-            t->court_cool = tank_randf(t, 40, 90);
-            tank_court_puff(t, 2);                  /* a flirt of bubbles, from the grass */
-        }
-    } else t->court_active = 0;
+    } else t->bud_tell_t = 0;
     /* a tool nobody has used for a while goes back in the box */
     if (t->tool && !t->drag_active && (t->tool_idle += dt) > TOOL_IDLE_S) t->tool = TOOL_HAND;
     /* a lifted finger ends the wipe/slash stroke (platform re-asserts while down) */
@@ -2061,7 +2035,11 @@ static void update_fish(tank_t *t, int idx, float dt) {
     /* touch: spooked Trubbles bolt from the tap site; trusting ones come to a
      * resting finger (reflex-layer, independent of the advisor's goal) */
     float touch_speed = -1;
-    if (t->startled && f->goal.id != GOAL_HIDE) {
+    if (idx == t->bud_parent) {
+        /* budding: it stays put while the lump grows and the pip comes out
+           - above everything, a startle included (it is 6 s) */
+        px = f->x; py = f->y; touch_speed = 0;
+    } else if (t->startled && f->goal.id != GOAL_HIDE) {
         float d = tank_dist(f->x, f->y, t->startle_x, t->startle_y);
         if (d < STARTLE_RADIUS * 1.6f) {
             float dx = f->x - t->startle_x;
@@ -2075,11 +2053,6 @@ static void update_fish(tank_t *t, int idx, float dt) {
         float ph = t->clock * 1.1f + f->wander;
         px = t->stage_x + cosf(ph) * 24; py = t->stage_y;
         touch_speed = tank_dist(f->x, f->y, t->stage_x, t->stage_y) > 80 ? 44 : 20;
-    } else if (t->spawning && (idx == t->court_a || idx == t->court_b) &&
-               f->goal.id != GOAL_HIDE && !(t->ravenous && f->hunger > 6.5f)) {
-        /* the spawning (2026-09-24): outranks a resting finger and the
-         * greeting; a starving parent still begs first */
-        court_steer(t, f, idx, &px, &py, &touch_speed);
     } else if (t->hold_active && t->hold_time >= HOLD_ATTRACT_S &&
                f->goal.id != GOAL_HIDE && f->trust >= 4.0f &&
                f->hunger < HOLD_HUNGER_VETO) {
@@ -2111,11 +2084,6 @@ static void update_fish(tank_t *t, int idx, float dt) {
             py = 30;
             touch_speed = fabsf(f->x - px) > 18 ? lerpf(40, 68, clampf(f->hunger / 10.0f, 0, 1)) : 22;
         }
-    } else if (t->court_active > 0 && !t->ravenous &&
-               (idx == t->court_a || idx == t->court_b) &&
-               f->goal.id != GOAL_HIDE && f->hunger < HOLD_HUNGER_VETO) {
-        /* the tell: an episode of the courtship circle */
-        court_steer(t, f, idx, &px, &py, &touch_speed);
     }
 
     /* urgency scales cruise speed a touch (0..9 -> 0.8..1.25) */

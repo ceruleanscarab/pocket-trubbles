@@ -421,10 +421,9 @@ static void apply_growth(fish_t *f) {
 
 static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_QUARTET, TMS_QUINTET, TMS_SEXTET };
 
-/* the parents: the two most trusting grown fish - or, with fewer than two
- * grown (at two fish no stage is gated), the most trusting of the rest fill
- * in, so there is always a pair to court (2026-09-24: the spawning needs
- * two fish in the grass; tank_add_fish already fell back to fish 0 and 1) */
+/* the fallback parents (Trubbles: a bud has one, the content fluff - this
+ * pick is for an arrival with no fluff to bud from: forced, or staged
+ * before budding): the two most trusting grown fish, the rest filling in */
 static float parent_rank(const fish_t *f) { return (f->stage >= STAGE_ADULT ? 100.0f : 0.0f) + f->trust; }
 static void pick_parents(const tank_t *t, int *pa, int *pb) {
     int a = -1, b = -1;
@@ -445,15 +444,23 @@ static void do_arrival(tank_t *t) {
     if (a < 0) pick_parents(t, &a, &b);
     int slot = tank_add_fish(t, a, b);
     s_arrival_pending = false;
-    s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0;
+    s_spawn_in = -1;
+    float lx, ly, lr, neck;
+    bool split = t->bud_parent == a && a >= 0 && tank_bud_lump(t, &lx, &ly, &lr, &neck) && t->bud_t >= BUD_PINCH_S;
+    if (!split) t->bud_parent = -1;          /* (a wake or a forced arrival: no moment to finish) */
     if (slot < 0) return;
-    if (a >= 0) {                            /* beside its parent, dropped in to land (the budding moment comes later) */
+    fish_t *pip = &t->fish[slot];
+    if (split) {                             /* out of the lump, with a little hop away from its parent */
+        pip->x = lx; pip->y = ly; pip->perch = PERCH_AIR;
+        pip->vx = t->bud_dir * 70.0f; pip->vy = -230.0f;
+        t->fish[a].squash = 0.6f;            /* the parent's relieved bounce */
+    } else if (a >= 0) {                     /* beside its parent, dropped in to land */
         const fish_t *p = &t->fish[a];
         float side = p->x < TANK_W * 0.5f ? 1.0f : -1.0f;
-        t->fish[slot].x = p->x + side * TRUB_R * (p->size + t->fish[slot].size);
-        t->fish[slot].y = p->y - TRUB_R; t->fish[slot].perch = PERCH_AIR;
-        s_bud[a] = 0;                        /* the parent starts banking again */
+        pip->x = p->x + side * TRUB_R * (p->size + pip->size);
+        pip->y = p->y - TRUB_R; pip->perch = PERCH_AIR;
     }
+    if (a >= 0) s_bud[a] = 0;                /* the parent starts banking again */
     s_bud[slot] = 0;
     s_age[slot] = 0;
     t->fish[slot].ms_bits = MS_ARRIVED;
@@ -934,10 +941,6 @@ void progression_tick(tank_t *t, float dt) {
     t->ravenous = s_ravenous;
     t->ravenous_fed = s_ravenous && t->player_feedings != s_rav_feedings0;
 
-    /* the courtship tell: one condition shy of an arrival (or one staged),
-     * the parents-to-be pair up - tank.c stages the episodes. The pair is
-     * the one do_arrival will name (pick_parents). */
-    t->courting = false; t->court_a = t->court_b = -1;
     /* budding (Trubbles): a fluff banks lit content time (BUD_*) */
     for (int i = 0; i < t->n_fish; i++) {
         const fish_t *f = &t->fish[i];
@@ -945,18 +948,13 @@ void progression_tick(tank_t *t, float dt) {
         s_bud[i] += f->content >= BUD_CONTENT ? dt : -dt * BUD_DRAIN;
         s_bud[i] = s_bud[i] < 0 ? 0 : s_bud[i] > BUD_CONTENT_S ? BUD_CONTENT_S : s_bud[i];
     }
-    /* (the courtship tell and the spawning are dormant: budding replaces
-       them - the budding moment comes in its own step) */
-    if (false && t->n_fish < POP_CAP && t->n_fish < N_FISH_MAX && tank_nursery_bed(t) >= 0) {
-        /* ... and only with a nursery: a bed tall enough to hide in. Shave
-         * every bed and the courting stops until one regrows. */
+    /* the tell: one gate shy of a bud (or one staged), the fluff that would
+     * bud wobbles now and then - tank.c times the wobbles */
+    t->bud_tell = -1;
+    if (t->n_fish < POP_CAP && t->n_fish < N_FISH_MAX) {
         int met, total;
         arrival_conditions(t, &met, &total);
-        if (s_arrival_pending || met >= total - 1) {
-            int a, b;
-            pick_parents(t, &a, &b);
-            if (a >= 0 && b >= 0) { t->courting = true; t->court_a = (int8_t)a; t->court_b = (int8_t)b; }
-        }
+        if (s_arrival_pending || met >= total - 1) t->bud_tell = (int8_t)progression_bud_parent(t);
     }
 
     /* light-on: greet (the light no longer brings the fry) */
@@ -965,33 +963,35 @@ void progression_tick(tank_t *t, float dt) {
     s_prev_night = t->night;
     if (light_on_edge) t->greet_timer = 6.0f;
     if (!s_arrival_pending && arrival_earned(t)) { s_arrival_pending = true; mark_dirty(); }
-    /* (Trubbles, interim) a staged bud arrives a little after the last gate
-       closed - the spawning's SPAWN_WAIT_MIN_S..MAX_S of lit awake seconds,
-       paused under a page - and only at a calm moment: the parent fed (not
-       peckish) and unafraid. The budding moment itself comes in its own step. */
-    if (s_arrival_pending && !t->night && !t->ui_cover) {
+
+    /* the budding moment (tank.h BUD_*). A staged bud waits a little after
+     * its last gate - SPAWN_WAIT_MIN_S..MAX_S of lit awake seconds, paused
+     * by the dark and by a page - then for a calm moment: the parent fed,
+     * unafraid, standing on something. Then the parent stops and swells, a
+     * lump rises beside it on its roomier side, and at BUD_SPLIT_S the pip
+     * comes out there (do_arrival). With no fluff to bud from (a staged
+     * arrival from before budding) it simply arrives. */
+    if (t->bud_parent >= 0) {
+        if (!t->bud_split && t->bud_t >= BUD_SPLIT_S) {
+            if (s_arrival_pending) do_arrival(t);
+            t->bud_split = true;
+        }
+    } else if (s_arrival_pending && !t->night && !t->ui_cover) {
         int p = progression_bud_parent(t);
         if (s_spawn_in < 0) s_spawn_in = tank_randf(t, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S);
         if ((s_spawn_in -= dt) <= 0) {
             s_spawn_in = 0;                          /* due: waits on the calm moment */
-            if (p < 0 || (t->fish[p].hunger < 7 && t->fish[p].stress < 5)) do_arrival(t);   /* (no fluff: a staged arrival from before budding) */
+            if (p < 0) do_arrival(t);
+            else {
+                const fish_t *f = &t->fish[p];
+                if (f->hunger < 7 && f->stress < 5 && f->perch != PERCH_AIR && fabsf(f->vx) < 20) {
+                    float x0 = TANK_FX0, x1 = TANK_FX1;
+                    if (f->perch >= 1) tank_surface_top(f->perch, &x0, &x1);
+                    t->bud_parent = (int8_t)p; t->bud_t = 0; t->bud_split = false;
+                    t->bud_dir = f->x - x0 > x1 - f->x ? -1 : 1;   /* toward the room */
+                }
+            }
         }
-    }
-
-    /* the spawning (progression.h): a staged fry is born on its own, a
-     * little after the last gate closed, while the keeper can see it. The
-     * wait counts real awake seconds (not progression_time_scale) and pauses
-     * under a page; a dance cut short (a page, the grass shaved) starts
-     * over with a fresh wait. */
-    if (!s_arrival_pending || !t->courting || t->ui_cover) {
-        if (t->spawning) s_spawn_in = -1;
-        t->spawning = false; t->spawn_danced = 0;
-    } else if (!t->spawning) {
-        if (s_spawn_in < 0) s_spawn_in = tank_randf(t, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S);
-        if ((s_spawn_in -= dt) <= 0) { s_spawn_in = -1; t->spawning = true; t->spawn_danced = 0; }
-    } else if (t->spawn_danced >= SPAWN_DANCE_S) {
-        do_arrival(t);                       /* between them, in the fronds */
-        tank_court_puff(t, 3);
     }
 
     /* saves: coalesced event saves + heartbeat */

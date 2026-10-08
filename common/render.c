@@ -218,10 +218,13 @@ static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drows
     *flat = stress; *drowsy = sleepy;
     return c;
 }
-static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float hush) {
+/* hush: fur pressed flat (hiding); glow: 0..1 warm light (the bud's tell);
+   unborn: a bud's lump - eyes shut, fur undimmed */
+static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float hush, float glow, bool unborn) {
     float R = TRUB_R * f->size, flat, drowsy;
     uint32_t fur = trub_fur(f, asleep, &flat, &drowsy);
     if (hush > flat) flat = hush;                      /* tucked away: fur pressed flat */
+    if (glow > 0) fur = mix(fur, 0xffd98a, 0.55f * glow);
     uint32_t fur_dark = mix(fur, 0x000000, 0.35f), fur_lite = mix(fur, 0xffffff, 0.35f);
     /* squash on landing, stretch in the air, a slow breath at rest; stress
        presses it flat. The feet stay on the ground: the body sinks to them. */
@@ -269,16 +272,21 @@ static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool aslee
     float ey = cy - 0.12f * ry, ex = face * 0.20f * rx, gap = 0.34f * rx * (0.75f + 0.25f * fabsf(face));
     for (int k = 0; k < 2; k++) {
         float x = cx + ex + (k ? gap : -gap) * (1 - 0.15f * fabsf(face));
-        if (asleep) {
+        if (asleep || unborn) {
             fill_ellipse(c, x, ey + 0.05f * R, 0.20f * R, 0.05f * R, 0x241a22, 230);
             continue;
         }
-        float er = 0.25f * R * (1 + 0.12f * flat);
+        /* a small one's eyes are big for its body (a pip's would be 2 px and read as shut) */
+        float baby = clamp01((1.0f - f->size) / 0.5f);
+        float er = 0.25f * R * (1 + 0.12f * flat) * (1 + 0.6f * baby);
         fill_ellipse(c, x, ey, er, er * 1.15f, 0xffffff, 255);
         float pr = er * (0.62f - 0.22f * flat);
         float px_ = x + face * er * 0.28f, py_ = ey + er * 0.10f;
         fill_ellipse(c, px_, py_, pr, pr * 1.1f, 0x140c12, 255);
-        fill_ellipse(c, px_ - pr * 0.35f, py_ - pr * 0.4f, pr * 0.32f, pr * 0.32f, 0xffffff, 230);
+        /* the glint: on a small pupil one pixel - an ellipse there paints a row
+           ~3 px wide that slices the pupil and reads as a squint */
+        if (pr < 3.5f) px_blend(c, (int)(px_ - pr * 0.4f), (int)(py_ - pr * 0.45f), 0xffffff, 230);
+        else fill_ellipse(c, px_ - pr * 0.35f, py_ - pr * 0.4f, pr * 0.32f, pr * 0.32f, 0xffffff, 230);
         /* drowsy: the lids come halfway down */
         if (drowsy > 0.4f) {
             float lid = er * 1.15f * (0.3f + 0.7f * (drowsy - 0.4f) / 0.6f);
@@ -321,7 +329,42 @@ static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f) {
                 tf.x += sinf(t->clock * 45 + f->wander) * 0.7f; break;
             }
         }
-    draw_trubble_core(c, &tf, t->clock, asleep, hush);
+    /* budding (tank.h BUD_*): the tell's wobble and glow; the parent's swell
+       and, beside it, the lump on its narrowing neck */
+    int idx = (int)(f - t->fish);
+    float glow = 0;
+    if (idx == t->bud_tell && t->bud_tell_t > 0) {
+        float ph = 1 - t->bud_tell_t / BUD_TELL_S, env = sinf(ph * 3.14159f);
+        tf.squash = sinf(ph * 3.14159f * 6) * 0.35f * env;      /* squash and stretch, back and forth */
+        glow = env;
+    }
+    if (idx == t->bud_parent) {
+        float bt = t->bud_t, sw = bt < BUD_SWELL_S ? bt / BUD_SWELL_S : bt < BUD_SPLIT_S ? 1
+                 : 1 - (bt - BUD_SPLIT_S) / (BUD_MOMENT_S - BUD_SPLIT_S);
+        sw = sw < 0 ? 0 : sw > 1 ? 1 : sw;
+        float grow = 1 + (0.12f + 0.02f * sinf(t->clock * 9)) * sw;
+        float R0 = TRUB_R * f->size;
+        tf.size = f->size * grow;
+        tf.y = f->y + R0 - TRUB_R * tf.size;                     /* feet stay down */
+        glow = 0.6f * sw;
+        float lx, ly, lr, neck;
+        if (tank_bud_lump(t, &lx, &ly, &lr, &neck) && lr > 1) {
+            float fl;
+            uint32_t fur = trub_fur(f, false, &fl, &(float){0});
+            if (neck > 0.5f) {                                  /* the neck: a bridge of fur to the parent */
+                float mx = (lx + f->x) * 0.5f, half = fabsf(lx - f->x) * 0.5f;
+                fill_ellipse(c, mx, ly, half, neck, fur, 255);
+            }
+            fish_t lump = *f;
+            lump.x = lx; lump.y = ly; lump.size = lr / TRUB_R; lump.perch = PERCH_FLOOR;
+            lump.vx = lump.vy = 0; lump.squash = 0; lump.chirp_s = 0;
+            lump.content = 5; lump.hunger = 4; lump.stress = 0; lump.energy = 7;   /* the pip's own starting mood
+                                                                                   (tank_make_fish): one colour before and after */
+            lump.yaw = -t->bud_dir;                             /* looking back at its parent */
+            draw_trubble_core(c, &lump, t->clock, false, 0, 0.3f, true);
+        }
+    }
+    draw_trubble_core(c, &tf, t->clock, asleep, hush, glow, false);
     if (f->chirp_s > 0) draw_notes(c, f, t->clock);
 }
 
@@ -2738,7 +2781,7 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
     f.color = body; f.fin = fin; f.accent = accent;
     tank_fish_face(&f);                          /* side-on, facing right */
     f.energy = 8; f.content = 7; f.perch = PERCH_FLOOR;
-    draw_trubble_core(&c, &f, clock, false, 0);
+    draw_trubble_core(&c, &f, clock, false, 0, 0, false);
 }
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock) {
     ctx_t c = ctx_page(fb, stride);
@@ -2749,7 +2792,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
     f.color = who->color; f.fin = who->fin; f.accent = who->accent;
     tank_fish_face(&f);
     f.energy = 8; f.content = 7; f.perch = PERCH_FLOOR; f.preset = who->preset;
-    draw_trubble_core(&c, &f, clock, false, 0);
+    draw_trubble_core(&c, &f, clock, false, 0, 0, false);
 }
 void render_confirm_reset(uint16_t *fb, int stride, float frac) {
     ctx_t c = ctx_page(fb, stride);              /* ignores night dimming, like the card */
