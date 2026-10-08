@@ -27,7 +27,7 @@ const char *const MS_NAMES[MS_FISH_COUNT] = {
 const char *const TMS_NAMES[TMS_COUNT] = {
     "a pair", "a trio", "a quartet", "a quintet", "a sextet",
     "first full night's sleep", "first play session", "the pod changed someone", "first feeding",
-    "first trimming", "first viewport cleaning", "a school of ten shrimp",
+    "first trimming", "first glass cleaning",   /* the pod's front glass, not the starfield viewport */ "a school of ten shrimp",
     "first visit to the reef",
 };
 

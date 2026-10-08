@@ -1,7 +1,9 @@
-/* render.c — porthole look: deep gradient water, AMOLED-black floor, procedural
- * fish (body polygon + animated tail + earned markings), bubbles, seagrass
- * the keeper trims. Everything is drawn
- * into a bare RGB565 buffer; night dims the palette. */
+/* render.c — the habitat pod (Trubbles, 2026-10-08; it was pocket-tank's
+ * aquarium): a slate wall with a starfield viewport, a steel deck and
+ * shelves, procedural Trubbles (fur, eyes, feet, mood), the air vent's
+ * motes, the fuzz moss the keeper trims and the grime the keeper wipes off
+ * the glass. Everything is drawn into a bare RGB565 buffer; night dims the
+ * palette. */
 #include "render.h"
 #include "icons.h"
 #include "progression.h"
@@ -423,6 +425,10 @@ static void draw_shrimp(ctx_t *c, const shrimp_t *q, const src_t *pal) {
 
 /* algae film on the glass, drawn over everything: dappled blobs per covered
  * grid cell, thicker film = bigger and greener. The keeper wipes it off. */
+/* the grime on the pod's front glass (Trubbles, 2026-10-08; it was the
+ * algae film - the same cells, the same wipe): dusty grey-brown smudges,
+ * heavier as a cell films over, and on a thick patch a few beads of
+ * condensation catching the light */
 static void draw_algae(ctx_t *c, const tank_t *t) {
     for (int cy = 0; cy < ALGAE_ROWS; cy++)
         for (int cx = 0; cx < ALGAE_COLS; cx++) {
@@ -436,8 +442,16 @@ static void draw_algae(ctx_t *c, const tank_t *t) {
                 float oy = (float)((hb >> 5) % ALGAE_CELL);
                 float r = (1.5f + (float)((hb >> 10) % 3)) * (0.55f + 0.45f * cov / 255.0f)
                         + 2.2f * cov / 255.0f;
-                fill_ellipse(c, bx + ox, by + oy, r, r * 0.85f,
-                             (hb & 4) ? 0x3f7a45 : 0x35663d, 34 + cov * 96 / 255);
+                fill_ellipse(c, bx + ox, by + oy, r * 1.15f, r * 0.75f,
+                             (hb & 4) ? 0x6b6455 : 0x57534a, 30 + cov * 90 / 255);
+            }
+            if (cov > 130 && (h & 3) != 0) {                  /* condensation beads */
+                for (int d = 0; d < 2; d++) {
+                    uint32_t hd = h ^ ((d + 5) * 2246822519u);
+                    float x = bx + (float)(hd % ALGAE_CELL), y = by + (float)((hd >> 7) % ALGAE_CELL);
+                    fill_ellipse(c, x, y, 1.3f, 1.5f, 0xbccad2, 70);
+                    px_blend(c, (int)(x - 0.5f), (int)(y - 0.8f), 0xffffff, 120);
+                }
             }
         }
 }
@@ -529,14 +543,16 @@ static inline uint32_t wall_rgb(int y) {
  * frond covers OTHER than water changes: a fish behind a front-layer frond
  * no longer shows through at 14%. */
 #define VEG_ALPHA 220
-static uint16_t g_veg_row[4][TANK_H];   /* grass pair, then the sword plant's yellow-green pair */
+static uint16_t g_veg_row[6][TANK_H];   /* the moss pair, the sword plant's yellow-green pair, the moss's puff pair */
 static float    g_veg_row_dim = -1;
 static void veg_tint_fill(float dim) {
-    static const uint32_t frond[4] = { 0x3f8b55, 0x2e7d4f, 0x8dbb48, 0x6c9d38 };
+    /* the fuzz moss (Trubbles, 2026-10-08; it was seagrass): muted sage stalks
+       and paler puffs at their tips; the sword plant's pair unchanged */
+    static const uint32_t frond[6] = { 0x6f9763, 0x5d8668, 0x8dbb48, 0x6c9d38, 0xa9c98c, 0x93b98a };
     if (g_veg_row_dim == dim) return;
     for (int y = 0; y < TANK_H; y++) {
         uint32_t w = wall_rgb(y);
-        for (int k = 0; k < 4; k++)
+        for (int k = 0; k < 6; k++)
             g_veg_row[k][y] = rgb565(mix(w, frond[k], VEG_ALPHA / 255.0f), dim);
     }
     g_veg_row_dim = dim;
@@ -591,12 +607,25 @@ static inline void veg_span(ctx_t *c, int x0, int x1, int y, const src_t *s, boo
 /* layer: 0 = the even fronds, 1 = the odd ones, -1 = every frond */
 static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final) {
     veg_tint_fill(c->dim);
+    /* the moss puff's fuzz: a fixed wobble of its half-width, looked up by
+       row (on the stalks too it cost ~20% of a full canopy, --bench) */
+    static float fuzz[64]; static bool fuzz_made;
+    if (!fuzz_made) {
+        for (int k = 0; k < 64; k++) {                    /* -0.5 / 0 / 0 / +0.5: ragged, but no wider on average */
+            uint32_t h = (uint32_t)k * 2654435761u; h ^= h >> 15; int q = (h >> 7) & 3;
+            fuzz[k] = q == 0 ? -0.5f : q == 3 ? 0.5f : 0.0f;
+        }
+        fuzz_made = true;
+    }
     int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
     /* the sword plant (bed 3, the shop): broad lanceolate leaves - a narrow
        stem, 7 px half-width at 40% of the way up, a point at the tip - a
        lazier sway, its own yellow-green pair */
     bool sword = tank_veg_kind(t, b) == VEG_KIND_SWORD;
-    float root = 2.4f, tip = 0.4f, amp = sword ? 2.5f : 4.0f;
+    /* fuzz moss: a soft stalk, a little sturdier than the grass was, and a
+       fuzzy puff at its tip - a cut frond is shorter moss with its puff where
+       the cut left it */
+    float root = sword ? 2.4f : 2.3f, tip = sword ? 0.4f : 0.8f, amp = sword ? 2.5f : 2.6f;   /* (moss: ~10% more pixels than the grass, measured with --bench) */
     for (int i = 0; i < n; i++) {
         if (layer >= 0 && (i & 1) != layer) continue;
         float bx;
@@ -615,8 +644,12 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
          * ellipses drew (their union was a 5 px ribbon), at ~a quarter fewer
          * pixels and without a sqrt per row. Full canopy = ~1000 segments. */
         const uint16_t *pal = g_veg_row[(sword ? 2 : 0) + ((i + seed) & 1)];
+        const uint16_t *puff = g_veg_row[4 + ((i + seed) & 1)];
+        bool tufted = !sword && segs >= 4;                       /* a puff on top of all but the nubs */
         int y_bot = (int)(TANK_BOT - 16 + VEG_SEG_RY);
         int y_top = (int)(TANK_BOT - 16 - (segs - 1) * VEG_SEG_DY - VEG_SEG_RY);
+        float y_tip = TANK_BOT - 16 - (segs - 1) * VEG_SEG_DY;       /* the stalk's top */
+        if (tufted) y_top -= 4;                                       /* the puff sits ON the stalk */
         for (int y = y_bot; y >= y_top; y--) {
             float sp = (TANK_BOT - 16 - y) / VEG_SEG_DY;          /* fractional segment */
             if (sp < 0) sp = 0;
@@ -629,9 +662,19 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
             float half = sword ? 1.2f + 6.0f * (u < 0.4f ? u / 0.4f : (1 - u) / 0.6f)
                                : root - (root - tip) * u;
             if (half < tip) half = tip;
+            bool in_puff = false;
+            if (!sword) {
+                float fz = fuzz[(y + (i + seed) * 23) & 63];                     /* the puff's fuzzy edge */
+                float from_top = y - y_tip;                          /* px below the stalk's top (< 0: above) */
+                if (tufted && from_top > -5 && from_top < 5) {        /* the puff: a round ball, centred on the top */
+                    float d = from_top / 5.0f;
+                    half = fmaxf(half, 4.4f * sqrtf(fmaxf(0, 1 - d * d)) + fz);
+                    in_puff = true;
+                }
+            }
             int k = (int)sp; float fr = sp - k;
             float cx = xs[k] + (xs[k + 1] - xs[k]) * fr;
-            src_t s; s.v = pal[y];                              /* opaque: only .v is read */
+            src_t s; s.v = in_puff ? puff[y] : pal[y];          /* opaque: only .v is read */
             veg_span(c, (int)(cx - half), (int)(cx + half), y, &s, final);
         }
     }
