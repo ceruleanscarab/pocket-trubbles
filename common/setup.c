@@ -30,6 +30,10 @@ static int  s_fish;            /* birth flow: the newborn's slot */
 static int  s_birth_offered = -1;   /* setup_poll_birth: the arrival already opened for (-1 = none since boot) */
 static int  s_page;
 static int  s_slot;            /* name pages: the slot the wheel turns */
+/* (Trubbles, 2026-10-08) a pod of one: the welcome is the lone Trubble
+ * found in the cargo bay, and the second name / look pages are skipped */
+static bool s_solo;
+static bool page_skipped(int pg) { return s_solo && (pg == SETUP_PG_NAME_B || pg == SETUP_PG_LOOK_B); }
 /* the finger (setup_touch) */
 static bool  s_down;
 static float s_px, s_py;       /* press point */
@@ -55,7 +59,8 @@ static void stage(tank_t *t);
 static void tidy_name(tank_t *t, int fish);
 
 void setup_begin(tank_t *t) {
-    if (t->n_fish < 2) { progression_setup_done(t); s_active = false; return; }   /* nothing to name */
+    if (t->n_fish < 1) { progression_setup_done(t); s_active = false; return; }   /* nothing to name */
+    s_solo = t->n_fish == 1;
     s_active = true; s_birth = false; s_place = false; s_rename = false; s_fish = -1; s_page = SETUP_PG_WELCOME; s_slot = 0; s_down = false;
     tank_emit(TEV_WELCOME, -1);
 }
@@ -351,12 +356,13 @@ void setup_activate(tank_t *t, int id) {
             if (s_birth) progression_newborn_done(t); else progression_setup_done(t);
             return;
         }
-        s_page++; s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
+        do s_page++; while (page_skipped(s_page));
+        s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
         return;
     }
     if (id == SETUP_HIT_BACK) {
         if (page_is_name()) tidy_name(t, page_fish());
-        if (s_page > first_page()) s_page--;
+        if (s_page > first_page()) do s_page--; while (page_skipped(s_page));
         s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
         return;
     }
@@ -426,6 +432,7 @@ static void nav(uint16_t *fb, int stride, bool top, const char *next_label, bool
 static void dots(uint16_t *fb, int stride, int y) {
     if (s_place || s_rename) return;                    /* one page: nothing to count */
     int n = s_birth ? SETUP_BIRTH_PAGES : SETUP_PG_N, cur = s_page - first_page();
+    if (!s_birth && s_solo) { n -= 2; if (s_page > SETUP_PG_LOOK_B) cur -= 2; }   /* the skipped pair's pages */
     int w = n * 10 - 4, x0 = (PAGE_W - w) / 2;
     for (int i = 0; i < n; i++) render_rect(fb, stride, x0 + i * 10, y, 6, 3, i == cur ? C_EDGE : C_DIM);
 }
@@ -563,7 +570,14 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             "EACH ONE THINKS FOR ITSELF.",
             "FIRST, LET'S MEET THEM.",
         };
-        lines_c(fb, stride, SETUP_Y + 96, 24, C_CAPT, ls, 5);
+        static const char *const solo[] = {        /* the keeper's own words for it (2026-10-08) */
+            "YOU FIND A LONE TRUBBLE",
+            "IN THE CARGO BAY.",
+            "IT EATS, ROLLS AND NAPS,",
+            "AND THINKS FOR ITSELF.",
+            "FIRST, LET'S MEET IT.",
+        };
+        lines_c(fb, stride, SETUP_Y + 96, 24, C_CAPT, s_solo ? solo : ls, 5);
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "NEXT", 2);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else if (s_page == SETUP_PG_BUBBLES) {
@@ -657,7 +671,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
+        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : s_solo ? "NAME YOUR TRUBBLE" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
         if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
         const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
         int n = name_len(f);
@@ -694,7 +708,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
         render_rect_blend(fb, stride, -PAGE_X, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
+        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : s_solo ? "NAME YOUR TRUBBLE" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
         nav(fb, stride, true, s_rename ? "DONE" : "NEXT", s_rename);
         int n = name_len(f);
         if (s_slot > n) s_slot = n;
@@ -803,7 +817,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else {                                                        /* SETUP_PG_CARE */
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 22, 3, C_TEXT, "CARING FOR THEM");
+        text_c(fb, stride, CX, SETUP_Y + 22, 3, C_TEXT, s_solo ? "CARING FOR IT" : "CARING FOR THEM");
         static const char *const ls[] = {
             "TAP THE SURFACE TO FEED",
             "HOLD A FINGER AND THEY VISIT",
@@ -813,7 +827,16 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             "TWO TAPS FLIP THE LIGHT",
             "THEY CHOOSE. YOU CARE.",
         };
-        lines_c(fb, stride, SETUP_Y + 66, 24, C_CAPT, ls, 7);
+        static const char *const solo[] = {
+            "TAP THE TOP TO DROP FOOD",
+            "HOLD A FINGER AND IT VISITS",
+            "TAP IT TO CHECK ON IT",
+            "DRAG THE GLASS TO WIPE ALGAE",
+            "SWIPE ACROSS GRASS TO TRIM",
+            "TWO TAPS FLIP THE LIGHT",
+            "IT CHOOSES. YOU CARE.",
+        };
+        lines_c(fb, stride, SETUP_Y + 66, 24, C_CAPT, s_solo ? solo : ls, 7);
         nav(fb, stride, false, "BEGIN", true);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     }

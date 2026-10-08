@@ -584,8 +584,24 @@ static int selftest_pop(void) {
        BUB, give it the blue body and white accent, empty the second name
        (the preset's returns), BEGIN; then reload and find it all kept */
     if (!progression_setup_pending()) { printf("FAIL: the reset tank should owe the setup\n"); return 1; }
-    /* (Trubbles: the setup was written for the founding pair and skips a pod
-       of one - until it is reworked, it is walked here with the second in) */
+    /* (Trubbles) a pod of one: the lone Trubble in the cargo bay - welcome,
+       bubbles, its name, its look, care; never the second's pages, either way */
+    {
+        if (tank.n_fish != 1) { printf("FAIL: the reset pod is not one Trubble (%d)\n", tank.n_fish); return 1; }
+        setup_begin(&tank);
+        static const int want[] = { SETUP_PG_WELCOME, SETUP_PG_BUBBLES, SETUP_PG_NAME_A, SETUP_PG_LOOK_A, SETUP_PG_CARE };
+        for (int k = 0; k < 5; k++) {
+            if (!setup_active() || setup_page() != want[k]) { printf("FAIL: the solo setup's page %d is %d, not %d\n", k, setup_page(), want[k]); return 1; }
+            if (k < 4) setup_activate(&tank, SETUP_HIT_NEXT);
+        }
+        setup_activate(&tank, SETUP_HIT_BACK);
+        if (setup_page() != SETUP_PG_LOOK_A) { printf("FAIL: BACK from care went to page %d, not the look\n", setup_page()); return 1; }
+        setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_NEXT);   /* care, BEGIN */
+        if (setup_active() || progression_setup_pending()) { printf("FAIL: BEGIN did not finish the solo setup\n"); return 1; }
+        printf("  solo setup ok: welcome, bubbles, name, look, care - the second's pages skipped both ways\n");
+        progression_reset(&tank, 11);                 /* the same fresh pod again, the setup owed */
+    }
+    /* the founding pair's walk: the setup still serves a pod of two */
     pod_of_two();
     setup_begin(&tank);
     if (!setup_active() || setup_page() != SETUP_PG_WELCOME) { printf("FAIL: setup did not open on the welcome page\n"); return 1; }
