@@ -710,9 +710,13 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
 #define CASTLE_TRIM   5                      /* the brick trim's width */
 enum { CT_LIGHT, CT_MID, CT_MIDDK, CT_DARK, CT_MORTAR, CT_MOSS_A, CT_MOSS_B,
        CT_BRICK_L, CT_BRICK, CT_BRICK_D, CT_ROOF_L, CT_ROOF, CT_ROOF_D, CT_INSIDE, CT_N };
+/* (Trubbles, 2026-10-08) the castle is a stack of CARGO CRATES: the same
+ * slots - the wall tones an olive crate's, the mortar its panel seams, the
+ * moss rust, the brick trim yellow-and-black hazard stripes round the
+ * loading gap, the roof tones the orange crates stacked on top */
 static const uint32_t CASTLE_RGB[CT_N] = {
-    0xd9c58c, 0xa99b7b, 0x87795f, 0x5d5446, 0x6a6151, 0x7aa33c, 0x527f2e,
-    0xe08a58, 0xc25f38, 0x8b3d24, 0xe4cd8a, 0xc4a95e, 0x8f7a42, 0x061219 };
+    0xa7b07a, 0x7f8a55, 0x636d40, 0x434b2b, 0x272c19, 0x7a5532, 0x5c3e22,
+    0xf2c33a, 0xd9a520, 0x26262a, 0xf3a25e, 0xe0803a, 0x9c5222, 0x07090c };
 /* [keep | gate][tone][row], row 0 = CASTLE_FY - CASTLE_ROWS */
 static uint16_t g_castle_row[2][CT_N][CASTLE_ROWS + 12];
 static float    g_castle_dim = -1;
@@ -757,30 +761,20 @@ static int castle_tone(int mode, int lx, int y, float u) {
     if (mode == 4) return CT_INSIDE;
     int d = CASTLE_FY - y;
     int lit = u < 0.22f ? -1 : u > 0.78f ? 1 : 0;
-    if (mode == 2) {
-        int m = castle_moss(lx, y, 18); if (m >= 0) return m;
-        static const int8_t pick[8] = { CT_MIDDK, CT_DARK, CT_DARK, CT_MIDDK, CT_MID, CT_DARK, CT_MIDDK, CT_DARK };
-        int t = pick[chash(lx >> 1, y) & 7] + (lit < 0 ? -1 : 0);
-        return t < CT_MID ? CT_MID : t;
-    }
-    int pitch = mode == 1 ? 4 : 5, len = mode == 1 ? 6 : 9;
-    int course = d / pitch;
-    if (d % pitch == 0) return mode == 3 ? CT_BRICK_D : mode == 1 ? CT_ROOF_D : CT_MORTAR;
-    int bx = lx + 4096 + ((course & 1) ? len / 2 : 0);
-    if (bx % len == 0) return mode == 3 ? CT_BRICK_D : mode == 1 ? CT_ROOF_D : CT_MORTAR;
-    if (mode == 3) {
-        static const int8_t pick[4] = { CT_BRICK, CT_BRICK, CT_BRICK_L, CT_BRICK_D };
-        int t = pick[chash(course, bx / len) & 3] + lit;
-        return t < CT_BRICK_L ? CT_BRICK_L : t > CT_BRICK_D ? CT_BRICK_D : t;
-    }
+    if (mode == 2)                                                        /* (Trubbles) the pallet: slats */
+        return (d % 4 == 0) ? CT_MORTAR : ((lx + 4096) % 22 < 3) ? CT_DARK : (lit < 0 ? CT_MID : CT_MIDDK);
+    /* (Trubbles) crates: panels 14 px wide and 18 tall, seamed, a rivet at
+       each panel's corner; the jambs hazard-striped */
+    if (mode == 3) return (((lx + 4096) + (CASTLE_FY - y)) / 4) & 1 ? CT_BRICK_L : CT_BRICK_D;
+    int bx = lx + 4096, px_ = bx % 14, py_ = d % 18;
+    if (px_ == 0 || py_ == 0) return mode == 1 ? CT_ROOF_D : CT_MORTAR;     /* the seams */
+    if ((px_ == 2 || px_ == 12) && (py_ == 2 || py_ == 16)) return mode == 1 ? CT_ROOF_L : CT_LIGHT;   /* rivets */
     if (mode == 1) {
-        static const int8_t pick[4] = { CT_ROOF, CT_ROOF, CT_ROOF_L, CT_ROOF_D };
-        int t = pick[chash(course, bx / len) & 3] + lit;
+        int t = CT_ROOF + lit + ((chash(bx / 14, d / 18) & 3) == 0 ? 1 : 0);
         return t < CT_ROOF_L ? CT_ROOF_L : t > CT_ROOF_D ? CT_ROOF_D : t;
     }
-    int m = castle_moss(lx, y, 0); if (m >= 0) return m;
-    static const int8_t pick[8] = { CT_MID, CT_MID, CT_MID, CT_MIDDK, CT_MID, CT_MIDDK, CT_LIGHT, CT_MIDDK };
-    int t = pick[chash(course, bx / len) & 7] + lit;
+    int m = castle_moss(lx, y, 0); if (m >= 0) return m;                    /* rust, low down */
+    int t = CT_MID + lit + ((chash(bx / 14, d / 18) & 3) == 0 ? 1 : 0);
     return t < CT_LIGHT ? CT_LIGHT : t > CT_DARK ? CT_DARK : t;
 }
 typedef struct { ctx_t *c; int cx; int layer; bool final; } cst_t;
@@ -814,15 +808,6 @@ static void castle_span(const cst_t *k, int lx0, int lx1, int y, int mode, float
 static void castle_rect(const cst_t *k, int lx0, int lx1, int ytop, int ybot, int mode) {
     for (int y = ytop; y <= ybot; y++) castle_span(k, lx0, lx1, y, mode, (float)lx0, (float)lx1);
 }
-/* a conical roof: half_base wide at ybase, a point at yapex, plus an eave
- * a pixel wider than the tower */
-static void castle_cone(const cst_t *k, int lxc, int half_base, int ybase, int yapex) {
-    for (int y = yapex; y <= ybase; y++) {
-        float t = (y - yapex) / (float)(ybase - yapex);
-        int half = (int)(half_base * t + 0.5f);
-        castle_span(k, lxc - half, lxc + half, y, 1, (float)(lxc - half), (float)(lxc + half));
-    }
-}
 /* merlons along a top edge: 7 wide, 7 tall, on a 12 px pitch */
 static void castle_merlons(const cst_t *k, int lx0, int lx1, int ytop) {
     for (int x = lx0; x + 6 <= lx1; x += 12) castle_rect(k, x, x + 6, ytop - 7, ytop - 1, 0);
@@ -850,11 +835,8 @@ static void castle_ring_fill(void) {
             float d = sqrtf(dx * dx + dy * dy);
             int8_t t = -1;
             if (d >= CASTLE_ARCH_R && d < R + 0.5f) {
-                float ang = atan2f(dy, dx) / 3.14159265f * 9;   /* 9 voussoirs across the half-turn */
-                int v = (int)ang; float fr = ang - v;
-                t = fr < 0.14f ? CT_BRICK_D : (chash(v, 3) & 3) == 0 ? CT_BRICK_L : (chash(v, 3) & 3) == 1 ? CT_BRICK_D : CT_BRICK;
-                if (v < 3 && t == CT_BRICK) t = CT_BRICK_L;    /* the lit side */
-                if (v > 5 && t == CT_BRICK) t = CT_BRICK_D;
+                float ang = atan2f(dy, dx) / 3.14159265f * 14;  /* (Trubbles) hazard stripes round the gap */
+                t = ((int)ang & 1) ? CT_BRICK_D : CT_BRICK_L;
             }
             g_ring[j][i] = t;
         }
@@ -906,11 +888,11 @@ static void castle_front_row(const cst_t *k) {
     castle_gate_wall(k);
     /* the left tower, pointed */
     castle_rect(k, -62, -34, FY - 78, FY, 0);
-    castle_cone(k, -48, 18, FY - 78, FY - 108);
+    castle_rect(k, -57, -39, FY - 98, FY - 79, 1);          /* (an orange crate on top, where the cone was) */
     castle_window(k, -48, 7, FY - 62, FY - 48);
     /* the short far-left tower */
     castle_rect(k, -86, -60, FY - 46, FY, 0);
-    castle_cone(k, -73, 17, FY - 46, FY - 72);
+    castle_rect(k, -82, -64, FY - 62, FY - 47, 1);
     castle_window(k, -73, 6, FY - 30, FY - 19);
     /* the open far-right tower, crenellated */
     castle_rect(k, 56, 86, FY - 70, FY, 0);
@@ -934,7 +916,7 @@ static void draw_castle(ctx_t *c, int cx, int front, bool final) {
     }
     /* the rear tower, tallest, right of centre: behind the wall */
     castle_rect(&k, 24, 54, FY - 108, FY, 0);
-    castle_cone(&k, 39, 19, FY - 108, FY - 142);
+    castle_rect(&k, 28, 50, FY - 128, FY - 109, 1);
     castle_window(&k, 39, 7, FY - 92, FY - 78);
     /* the curtain wall behind the gate's opening, then the courtyard's dark */
     castle_rect(&k, -44, 44, CASTLE_WALL_TOP, FY, 0);
@@ -1109,15 +1091,18 @@ static void coral_tint_fill(uint32_t rgb, float dim) {
     if (g_coral_rgb == rgb && g_coral_dim == dim) return;
     uint32_t tone[CO_N];
     tone[CO_NONE]  = 0;
-    tone[CO_RIM]   = mix(rgb, 0x30060e, 0.58f);
-    tone[CO_BODY]  = rgb;
-    tone[CO_SHADE] = mix(rgb, 0x000000, 0.24f);
-    tone[CO_LIT]   = mix(rgb, 0xfff0b0, 0.36f);
-    tone[CO_TIP]   = mix(rgb, 0xffe8a0, 0.58f);
+    /* (Trubbles, 2026-10-08) the coral is a GLOW FUNGUS: the keeper's colour,
+       lit from within - a bright body, glowing edges and near-white caps at
+       the branch tips - with less of the wall's haze, so it shines */
+    tone[CO_RIM]   = mix(rgb, 0x0a0a14, 0.55f);
+    tone[CO_BODY]  = mix(rgb, 0xffffff, 0.12f);
+    tone[CO_SHADE] = mix(rgb, 0x000000, 0.22f);
+    tone[CO_LIT]   = mix(rgb, 0xffffff, 0.45f);
+    tone[CO_TIP]   = mix(rgb, 0xffffff, 0.78f);
     for (int r = 0; r < CORAL_H; r++) {
         int y = CORAL_FY - CORAL_H + r;
         uint32_t w = wall_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
-        for (int k = 1; k < CO_N; k++) ds()->co_row[k][r] = rgb565(mix(w, tone[k], k == CO_TIP ? 0.94f : 0.90f), dim);   /* a light haze: the art's colour stays saturated */
+        for (int k = 1; k < CO_N; k++) ds()->co_row[k][r] = rgb565(mix(w, tone[k], k == CO_TIP ? 0.98f : 0.95f), dim);
     }
     g_coral_rgb = rgb; g_coral_dim = dim;
 }
@@ -1170,7 +1155,7 @@ static void draw_coral_crown(ctx_t *c, int cx, uint32_t rgb, float growth, float
     float ox = cx - CORAL_W / 2 + CORAL_TOP_X * CORAL_CELL + 1, oy = CORAL_FY - CORAL_TOP_Y * CORAL_CELL - 1;
     float len = CORAL_TENT_L * (0.35f + 0.65f * phase);
     /* a fan from ~29 deg left of up to 29 deg right, past the horizontal */
-    draw_crown(c, ox, oy, CORAL_TENT, -3.14159f * 0.16f, -3.14159f * 0.84f, len, mix(rgb, 0xffffff, 0.55f), 0, clock, bx0, by0, bx1, by1);
+    draw_crown(c, ox, oy, CORAL_TENT, -3.14159f * 0.16f, -3.14159f * 0.84f, len, mix(rgb, 0xffffff, 0.7f), 0, clock, bx0, by0, bx1, by1);   /* (the fungus's spore filaments) */
 }
 /* a low mound of floor stones round a piece's base (2026-09-24): the same
  * pebble tones and position hash as the floor, an ellipse half_w wide whose
@@ -1187,12 +1172,13 @@ static void draw_floor_mound(ctx_t *c, int cx, int half_w, int rise, bool final)
         int half = (int)(half_w * w);
         for (int x = cx - half; x <= cx + half; x++) {
             if (!CTX_IN(c, x, y)) continue;
-            uint32_t h2 = (uint32_t)((x * 73856093u) ^ (y * 19349663u));
-            uint32_t tone = (h2 >> 4) % 16;
-            uint32_t col = tone < 2 ? 0x2e3b2c : tone < 5 ? 0x22301f : tone < 8 ? 0x1a2418 : 0x101a12;
+            /* (Trubbles, 2026-10-08) a raised steel base plate in the deck's
+               tones, not a mound of pebbles: lit toward its crest, a rivet
+               ring along it */
+            uint32_t col = 0x2a323b;
             float up = (float)(fl - y) / rise;                           /* 0 at the floor line, 1 at the crest */
-            if (up > 0) col = mix(col, 0x56684f, 0.25f + 0.40f * up);   /* the hump rises into the light; its skirt is the floor */
-            if (up > 0.15f && (chash(x, y) & 15) == 0) col = 0x6e7f66;   /* a few lit grains */
+            if (up > 0) col = mix(col, 0x6d7a86, 0.15f + 0.45f * up);   /* the plate rises into the light; its skirt is the deck */
+            if (up > 0.25f && up < 0.45f && ((x - cx) % 6 + 6) % 6 == 0) col = 0x8e9aa6;   /* rivets */
             uint16_t *p = &CTX_PX(c, x, y);
             *p = rgb565(col, c->dim);
             rec_px(x, y);
@@ -1663,16 +1649,21 @@ int render_cluster_cells(float growth) { cl_build(growth); g_cl_q = -1; return g
 static void cl_tint_fill(int scheme, float dim) {
     if (g_cl_scheme == scheme && g_cl_dim == dim) return;
     const cluster_scheme_t *sc = &CLUSTER_SCHEMES[scheme];
-    uint32_t base[CLE_N] = { 0x9a9284, 0x8fc63a, sc->coral, sc->tube, sc->brain };
+    /* (Trubbles, 2026-10-08) the reef cluster is a CRYSTAL CLUSTER: the same
+       five shapes - dark mineral stones flecked with mica where the moss was,
+       pale crystal shards for the weed, and the branches, prisms and geode
+       dome in the look's colours, glassy: very bright lit edges, deep rims,
+       white glints for the tips and the prisms' tops, dark seams in the geode */
+    uint32_t base[CLE_N] = { 0x464b58, 0xbfe0f2, sc->coral, sc->tube, sc->brain };
     uint32_t tone[CL_TONES]; tone[0] = 0;
     for (int e = 0; e < CLE_N; e++) {
         uint32_t c = base[e];
+        bool rock = e == CLE_ROCK;
         tone[CL_TONE(e, CLV_BODY)]  = c;
-        tone[CL_TONE(e, CLV_LIT)]   = mix(c, 0xfff0b0, e == CLE_ROCK ? 0.22f : 0.36f);
-        tone[CL_TONE(e, CLV_RIM)]   = mix(c, e == CLE_ROCK ? 0x2a2620 : 0x20060e, 0.55f);
-        tone[CL_TONE(e, CLV_SHADE)] = mix(c, 0x000000, 0.24f);
-        tone[CL_TONE(e, CLV_DEEP)]  = e == CLE_ROCK ? 0x6f9a3a : e == CLE_CORAL ? mix(c, 0xffe8a0, 0.58f)
-                                    : e == CLE_TUBE ? mix(c, 0x100418, 0.65f) : e == CLE_BRAIN ? mix(c, 0x0a3040, 0.45f) : mix(c, 0xe8ff80, 0.40f);
+        tone[CL_TONE(e, CLV_LIT)]   = mix(c, 0xffffff, rock ? 0.20f : 0.55f);
+        tone[CL_TONE(e, CLV_RIM)]   = mix(c, 0x0a0a1a, rock ? 0.50f : 0.60f);
+        tone[CL_TONE(e, CLV_SHADE)] = mix(c, 0x000000, rock ? 0.20f : 0.30f);
+        tone[CL_TONE(e, CLV_DEEP)]  = rock ? 0x9fb3c8 : e == CLE_BRAIN ? mix(c, 0x101024, 0.55f) : mix(c, 0xffffff, 0.75f);
     }
     for (int r = 0; r < CL_H; r++) {
         int y = CL_FY - CL_H + r;

@@ -231,9 +231,11 @@ const uint32_t CORAL_PAL[CORAL_N] = { 0xff7a1e, 0xf2698f, 0xd24bb4, 0x8a5be0, 0x
  * orange coral, purple tubes, a cyan brain; LAGOON pink / blue / lime;
  * DUSK magenta / teal / gold */
 const cluster_scheme_t CLUSTER_SCHEMES[CLUSTER_SCHEME_N] = {
-    { "REEF",   0xff6a2a, 0x9b4fe0, 0x5fd8e8 },
-    { "LAGOON", 0xf25c8a, 0x3f8ff0, 0xb9f04a },
-    { "DUSK",   0xd24bb4, 0x2ec9b4, 0xf2c23a },
+    /* (Trubbles, 2026-10-08) the crystal cluster's looks: the save keeps the
+       index, so the names and colours are free to change */
+    { "AMETHYST", 0xb07cff, 0x7c5cff, 0x5fd8e8 },
+    { "AURORA",   0x5ff0c8, 0x3f8ff0, 0xb9e4ff },
+    { "EMBER",    0xff8a5a, 0xffc04a, 0xe25cff },
 };
 
 void tank_set_name(tank_t *t, int slot, const char *name) {

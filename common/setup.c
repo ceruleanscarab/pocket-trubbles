@@ -495,14 +495,16 @@ static void cluster_glyph(uint16_t *fb, int stride, int cx, int y_bot, const clu
     render_rect(fb, stride, cx - 4, y_bot - 12, 12, 8, sc->brain); render_rect(fb, stride, cx - 2, y_bot - 14, 8, 2, sc->brain);
 }
 static void castle_glyph(uint16_t *fb, int stride, int cx, int y_bot, uint32_t wall, uint32_t roof) {
-    const uint32_t tower = 0x87795f, dark = 0x0b1a22, trim = 0xc25f38;
+    /* (Trubbles) the cargo crates in little: two olive stacks with orange
+       crates on top, a crate across, the loading gap with its hazard stripe */
+    const uint32_t tower = 0x636d40, dark = 0x07090c, seam = 0x272c19;
     render_rect(fb, stride, cx - 14, y_bot - 14, 29, 15, wall);
-    for (int x = cx - 14; x + 2 <= cx + 14; x += 6) render_rect(fb, stride, x, y_bot - 17, 3, 3, wall);
     render_rect(fb, stride, cx - 21, y_bot - 24, 8, 25, tower);
-    for (int i = 0; i < 7; i++) render_rect(fb, stride, cx - 17 - i / 2, y_bot - 31 + i, 1 + i, 1, roof);
+    render_rect(fb, stride, cx - 20, y_bot - 30, 6, 6, roof);
     render_rect(fb, stride, cx + 13, y_bot - 20, 8, 21, tower);
-    for (int i = 0; i < 6; i++) render_rect(fb, stride, cx + 17 - i / 2, y_bot - 26 + i, 1 + i, 1, roof);
-    render_rect(fb, stride, cx - 5, y_bot - 9, 11, 1, trim);
+    render_rect(fb, stride, cx + 14, y_bot - 25, 6, 5, roof);
+    render_rect(fb, stride, cx - 21, y_bot - 12, 8, 1, seam); render_rect(fb, stride, cx + 13, y_bot - 10, 8, 1, seam);
+    for (int k = 0; k < 11; k++) render_rect(fb, stride, cx - 5 + k, y_bot - 9, 1, 1, (k / 2) & 1 ? 0x26262a : 0xf2c33a);
     render_rect(fb, stride, cx - 3, y_bot - 8, 7, 9, dark);
     render_rect(fb, stride, cx - 4, y_bot - 6, 9, 7, dark);
 }
@@ -517,9 +519,9 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
     const uint32_t la = 0x4f9a52, lb = 0x3e8546;     /* the tall fern's greens */
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
     if (item == 2) {
-        if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+        if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0x7f8a55, 0xe0803a);
         leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
-        if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+        if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0x7f8a55, 0xe0803a);
         return;
     }
     if (item == 4) {                                    /* the cluster: the same three readings as the coral's */
