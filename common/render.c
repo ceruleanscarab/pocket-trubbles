@@ -201,11 +201,8 @@ static float trub_hash(int i, int k) {
     return (float)((x ^ (x >> 16)) & 0xffff) / 65535.0f;
 }
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
-/* contentment until the drive exists (schema field `content`, step 3): fed,
- * calm and rested */
-static float trub_content(const fish_t *f) {
-    return clamp01((7 - f->hunger) / 5) * clamp01((6 - f->stress) / 5) * clamp01(f->energy / 5);
-}
+/* the warm glow: the content drive, from middling (4) to full (9) */
+static float trub_content(const fish_t *f) { return clamp01((f->content - 4) / 5); }
 static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drowsy) {
     float hungry = clamp01((f->hunger - 5) / 4);
     float stress = clamp01((f->stress - 3) / 5);
@@ -221,9 +218,10 @@ static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drows
     *flat = stress; *drowsy = sleepy;
     return c;
 }
-static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool asleep) {
+static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float hush) {
     float R = TRUB_R * f->size, flat, drowsy;
     uint32_t fur = trub_fur(f, asleep, &flat, &drowsy);
+    if (hush > flat) flat = hush;                      /* tucked away: fur pressed flat */
     uint32_t fur_dark = mix(fur, 0x000000, 0.35f), fur_lite = mix(fur, 0xffffff, 0.35f);
     /* squash on landing, stretch in the air, a slow breath at rest; stress
        presses it flat. The feet stay on the ground: the body sinks to them. */
@@ -293,9 +291,38 @@ static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool aslee
     }
 }
 
+/* a song: two little notes rising and fading over its head */
+static void draw_notes(ctx_t *c, const fish_t *f, float clock) {
+    float R = TRUB_R * f->size;
+    for (int k = 0; k < 2; k++) {
+        float ph = fmodf(clock * 0.9f + k * 0.5f + f->wander * 0.1f, 1.0f);
+        float x = f->x + (k ? 0.7f : -0.6f) * R + sinf(ph * 6.28f + k) * 3;
+        float y = f->y - R * 1.4f - ph * 22;
+        int a = (int)(230 * (1 - ph));
+        uint32_t col = k ? 0xffe28a : 0xbfe8ff;
+        fill_ellipse(c, x, y, 2.4f, 1.9f, col, a);
+        for (int yy = 0; yy < 7; yy++) px_blend(c, (int)(x + 2), (int)(y - yy), col, a);
+        px_blend(c, (int)(x + 3), (int)(y - 6), col, a);
+        px_blend(c, (int)(x + 4), (int)(y - 5), col, a);
+    }
+}
 /* the tank's Trubbles (the previews below draw one of their own) */
 static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f) {
-    draw_trubble_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST);
+    bool settled = f->perch != PERCH_AIR && fabsf(f->vx) < 4;
+    bool asleep = f->goal.id == GOAL_NAP && settled;
+    float hush = 0;
+    if (f->goal.id == GOAL_HIDE) { float hx, hy; tank_hide_spot(t, (int)(f - t->fish), &hx, &hy); if (fabsf(f->x - hx) < 12) hush = 0.7f; }
+    /* cuddling up against a friend: it thrums - a fast little shiver */
+    fish_t tf = *f;
+    if (f->goal.id == GOAL_CUDDLE)
+        for (int i = 0; i < t->n_fish; i++) {
+            const fish_t *o = &t->fish[i];
+            if (o != f && tank_dist(f->x, f->y, o->x, o->y) < TRUB_R * (f->size + o->size) + 3) {
+                tf.x += sinf(t->clock * 45 + f->wander) * 0.7f; break;
+            }
+        }
+    draw_trubble_core(c, &tf, t->clock, asleep, hush);
+    if (f->chirp_s > 0) draw_notes(c, f, t->clock);
 }
 
 /* ---- the shrimp (2026-09-29): cherry shrimp from 18 x 8 pixel grids,
@@ -1778,7 +1805,7 @@ static inline uint32_t floor_rgb(int x, int y) {
 #endif
 }
 /* the pod's shelves (Trubbles, 2026-10-08): a slab of warm stone with a
- * lit top lip and a shadowed underside, at tank_ledge's geometry */
+ * lit top lip and a shadowed underside, at tank_ledge's geometry; and the nook */
 static void draw_ledges(ctx_t *c) {
     for (int i = 0; i < N_LEDGES; i++) {
         float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
@@ -1788,6 +1815,15 @@ static void draw_ledges(ctx_t *c) {
         fill_poly(c, ls, ly, 4, 0x9c8668);
         float ss[4] = { x0 + 6, x1 - 6, x1 - 8, x0 + 8 }, sy[4] = { top + 10, top + 10, top + 13, top + 13 };
         fill_poly(c, ss, sy, 4, 0x3e3328);
+    }
+    /* the sleeping nook: a woven nest on the floor at the left end */
+    float nx, ny; tank_nook(&nx, &ny);
+    float base = FLOOR_Y + 2;
+    fill_ellipse(c, nx, base - 5, 30, 9, 0x5a4330, 255);
+    fill_ellipse(c, nx, base - 8, 24, 5, 0x2e2219, 255);
+    for (int i = 0; i < 9; i++) {
+        float x = nx - 26 + i * 6.5f;
+        fill_ellipse(c, x, base - 6 + (i & 1), 4, 2, 0x8a6a48, 200);
     }
 }
 
@@ -2701,8 +2737,8 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
     f.hunger = 4; f.stress = 0; f.goal.id = GOAL_EXPLORE;
     f.color = body; f.fin = fin; f.accent = accent;
     tank_fish_face(&f);                          /* side-on, facing right */
-    f.energy = 8; f.perch = PERCH_FLOOR;
-    draw_trubble_core(&c, &f, clock, false);
+    f.energy = 8; f.content = 7; f.perch = PERCH_FLOOR;
+    draw_trubble_core(&c, &f, clock, false, 0);
 }
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock) {
     ctx_t c = ctx_page(fb, stride);
@@ -2712,8 +2748,8 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
     f.hunger = 4; f.stress = 0; f.goal.id = GOAL_EXPLORE;
     f.color = who->color; f.fin = who->fin; f.accent = who->accent;
     tank_fish_face(&f);
-    f.energy = 8; f.perch = PERCH_FLOOR; f.preset = who->preset;
-    draw_trubble_core(&c, &f, clock, false);
+    f.energy = 8; f.content = 7; f.perch = PERCH_FLOOR; f.preset = who->preset;
+    draw_trubble_core(&c, &f, clock, false, 0);
 }
 void render_confirm_reset(uint16_t *fb, int stride, float frac) {
     ctx_t c = ctx_page(fb, stride);              /* ignores night dimming, like the card */

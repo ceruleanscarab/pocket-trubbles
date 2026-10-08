@@ -79,7 +79,7 @@ float tank_glass_top(float x);                         /* the glass above x (0 i
 void  tank_glass_clamp(float *x, float *y, float m);   /* (x,y) brought to at least m px inside the glass and above the bottom */
 
 #define N_FISH_MAX 6            /* array bound; the live count is tank_t.n_fish */
-#define N_FISH_START 2          /* a new tank: two contrasting adults */
+#define N_FISH_START 1          /* a new pod: one Trubble (Trubbles brief, 2026-10-08; the fish tank began with a contrasting pair) */
 #define N_TRAINED_NAMES 4       /* name tokens the v2 model was trained on */
 #define FISH_NAME_MAX 7         /* the keeper's name for a fish (first-run setup) */
 #define LOOK_N 8                /* body / accent swatches the keeper can pick from */
@@ -177,13 +177,16 @@ int tank_algae_cells(void);                    /* the cells that are on the glas
                                                 * night's sleep films ~17% (selftest-tend;
                                                 * ~25% before 2026-09-23) */
 
+/* the Trubbles goals (model/trubbles_schema.md, in its order). The trained
+ * fish model knows none of these words, so advisor_core_init refuses it and
+ * the rules brain (advisor.c) decides until a Trubbles model is trained. */
 typedef enum {
-    GOAL_SEEK_FOOD, GOAL_FLEE_SHADOW, GOAL_VISIT_BUBBLES, GOAL_FOLLOW_FRIEND,
-    GOAL_EXPLORE, GOAL_REST, GOAL_DART_PLAY, GOAL_INSPECT_REEF,
+    GOAL_EAT, GOAL_CUDDLE, GOAL_ROLL, GOAL_NAP,
+    GOAL_EXPLORE, GOAL_GREET_KEEPER, GOAL_HIDE, GOAL_CHIRP,
     GOAL_COUNT
 } goal_id_t;
 
-extern const char *const GOAL_NAMES[GOAL_COUNT];   /* schema.md lowercase names */
+extern const char *const GOAL_NAMES[GOAL_COUNT];   /* trubbles_schema.md lowercase names */
 
 typedef enum { STAGE_FRY, STAGE_JUV, STAGE_ADULT, STAGE_ELDER } stage_t;
 extern const char *const STAGE_NAMES[4];           /* schema.md v2 stage tokens */
@@ -256,8 +259,15 @@ typedef struct {
     float turn_rate;        /* rad/s */
     /* drives, 0..10 as in the prototype (schema encoding clamps to 0..9) */
     float hunger, energy, stress, curiosity;
+    /* Trubbles drives (trubbles_schema.md), 0..10 like the rest, not saved:
+     * content rises with meals, cuddles, the keeper's strokes and calm and
+     * falls with hunger and stress; crowd is the neighbours close by plus
+     * the colony against the pod's capacity (recomputed every frame) */
+    float content, crowd;
     /* personality 0..1 (schema v2 encodes bold/sociable as 0-9) */
-    float sociable, bold, lazy;
+    float sociable, bold, lazy;  /* sociable is the schema's `cuddly` */
+    float chatty;           /* 0..1, the schema's `chatty`: from the roster slot, so a reload keeps it */
+    float chirp_s;          /* > 0: singing this frame (a chirp goal at its spot), for chorus and the notes */
     float bold0, sociable0; /* values at creation: drift is measured from here */
     stage_t stage;
     goal_t goal;
@@ -525,6 +535,8 @@ typedef struct tank {
     bool     feed_open;            /* a feed gesture not yet eaten from (transient, not saved) */
     int      hold_approaches;      /* calm holds that drew a fish all the way in */
     float    greet_timer;          /* light-on greeting: trusting fish come up front */
+    float    keeper_s;             /* seconds since the keeper last touched the glass (schema `keeper`) */
+    float    keeper_x;             /* ... and where */
     /* courtship tell (progression.c decides, tank.c performs): when the tank
      * is one care-condition away from earning an arrival - or one is already
      * staged - the two most-trusting grown fish occasionally circle together
@@ -783,6 +795,14 @@ float tank_dist(float ax, float ay, float bx, float by);
 void  tank_ledge(int i, float *x0, float *x1, float *top);   /* ledge i's span and top y */
 float tank_surface_top(int perch, float *x0, float *x1);     /* PERCH_FLOOR or 1..N_LEDGES */
 float tank_rest_y(float x, float y);                         /* the first surface top at or below (x, y) */
+#define POD_CAPACITY 8          /* the colony's most (schema: 1 to 8 Trubbles) */
+#define KEEPER_NEAR_S 4.0f      /* a touch this recent: `keeper near` */
+#define CHORUS_RANGE 160.0f     /* `mid` range: a chirp this close makes `chorus on` */
+void  tank_nook(float *x, float *y);                         /* the sleeping nook (a standing spot) */
+int   tank_hide_spot(const tank_t *t, int idx, float *x, float *y);   /* the nearest tuck-away spot */
+bool  tank_keeper_near(const tank_t *t);
+bool  tank_chorus(const tank_t *t, int idx);
+int   tank_nearest_pile(const tank_t *t, int idx, float *dist_out);    /* a member of the nearest pile of 2+ touching, or -1 */
 int   tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out);
 int   tank_nearest_friend(const tank_t *t, int fish_idx, float *dist_out);
 float tank_randf(tank_t *t, float lo, float hi);

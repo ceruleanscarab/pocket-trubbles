@@ -643,10 +643,10 @@ void progression_woke(tank_t *t) { if (s_arrival_pending) do_arrival(t); }
 void progression_stage_arrival(tank_t *t) { (void)t; if (!s_arrival_pending) { s_arrival_pending = true; mark_dirty(); } }
 
 void progression_fresh(tank_t *t) {
-    tank_new_population(t);          /* a new tank: two FRY, contrasting -
-                                      * the keeper watches them grow up */
+    tank_new_population(t);          /* a new pod: N_FISH_START (one) FRY -
+                                      * the keeper watches it grow up */
     for (int i = 0; i < N_FISH_MAX; i++) s_age[i] = 0;
-    t->tank_ms_bits = TMS_PAIR;
+    t->tank_ms_bits = POP_TMS[t->n_fish];   /* (a pair's badge only for a pair) */
     for (int i = 0; i < t->n_fish; i++) { t->fish[i].ms_bits = MS_ARRIVED; apply_growth(&t->fish[i]); }
     s_arrival_pending = false; s_spawn_in = -1; s_prev_night = t->night;
     s_ravenous = false; s_ravenous_t = 0; s_gave_up = false;
@@ -683,7 +683,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
      * every later tail's defaults (see the tail comments in save_t) */
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
-    if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
+    if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 1 || sv.n_fish > N_FISH_MAX) return false;   /* (Trubbles: a pod of one is a pod) */
     if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
@@ -832,15 +832,18 @@ void progression_tick(tank_t *t, float dt) {
         float pressure = 0;                                   /* what the traits WANTED to move, before the clamps */
         if (f->stress > 7) { f->bold = clampf(f->bold - k, 0.05f, 0.95f); pressure += k; }
         else if (f->hunger < 4 && f->stress < 2) { f->bold = clampf(f->bold + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
-        if (f->goal.id == GOAL_FOLLOW_FRIEND) { f->sociable = clampf(f->sociable + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
+        if (f->goal.id == GOAL_CUDDLE) { f->sociable = clampf(f->sociable + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
         else if (f->goal.id == GOAL_EXPLORE) { f->sociable = clampf(f->sociable - k * 0.2f, 0.05f, 0.95f); pressure += k * 0.2f; }
         f->drift_acc += pressure;
         if (fabsf(f->bold - f->bold0) >= 0.11f || fabsf(f->sociable - f->sociable0) >= 0.11f) changed_someone = true;
 
-        /* milestones: firsts the fish chose to do */
-        if (f->goal.id == GOAL_DART_PLAY && f->goal_age > 1.0f) set_ms(f, MS_FIRST_DART);
-        if (f->goal.id == GOAL_VISIT_BUBBLES && tank_dist(f->x, f->y, t->bubble_x, t->bubble_y) < 90) set_ms(f, MS_FIRST_BUBBLES);
-        if (f->goal.id == GOAL_INSPECT_REEF) {               /* its landmark: the reef cluster once there is one */
+        /* milestones: firsts the Trubble chose to do (Trubbles 2026-10-08: the
+           fish's bits kept for the saves, their badges re-skinned later -
+           first dart = first roll, first bubbles = first song, first follow =
+           first cuddle) */
+        if (f->goal.id == GOAL_ROLL && f->goal_age > 1.0f) set_ms(f, MS_FIRST_DART);
+        if (f->goal.id == GOAL_CHIRP && f->chirp_s > 1.0f) set_ms(f, MS_FIRST_BUBBLES);
+        if (f->goal.id == GOAL_EXPLORE) {                    /* its landmark: the reef cluster once there is one */
             float rx, ry; tank_reef_spot(t, &rx, &ry);
             if (tank_dist(f->x, f->y, rx, ry) < 90) {
                 set_ms(f, MS_INSPECTED);                      /* no badge (0.3.0): it reveals the curiosity slider */
@@ -850,10 +853,10 @@ void progression_tick(tank_t *t, float dt) {
         /* the seagrass: resting inside a canopy, or tucked into one while
            rattled - the grass as the place to be safe (2026-10-02, in the
            badge slot "first reef" had) */
-        if (((f->goal.id == GOAL_REST && f->goal_age > 2.0f) || f->stress >= 5.0f) && tank_in_grass(t, f->x, f->y))
+        if ((((f->goal.id == GOAL_NAP || f->goal.id == GOAL_HIDE) && f->goal_age > 2.0f) || f->stress >= 5.0f) && tank_in_grass(t, f->x, f->y))
             set_ms(f, MS_FIRST_GRASS);
-        if (f->goal.id == GOAL_FOLLOW_FRIEND && f->goal_age > 2.0f) set_ms(f, MS_FIRST_FOLLOW);
-        if (f->goal.id == GOAL_DART_PLAY) n_dart++;
+        if (f->goal.id == GOAL_CUDDLE && f->goal_age > 2.0f) set_ms(f, MS_FIRST_FOLLOW);
+        if (f->goal.id == GOAL_ROLL) n_dart++;
     }
     if (n_dart >= 2) set_tms(t, TMS_FIRST_PLAY_SESSION);
     if (changed_someone) set_tms(t, TMS_CHANGED_SOMEONE);

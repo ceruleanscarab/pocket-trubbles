@@ -12,8 +12,7 @@
 static void veg_sync(tank_t *t);   /* veg_growth[] = per-bed mean of veg_h[][] */
 
 const char *const GOAL_NAMES[GOAL_COUNT] = {
-    "seek_food", "flee_shadow", "visit_bubbles", "follow_friend",
-    "explore", "rest", "dart_play", "inspect_reef",
+    "eat", "cuddle", "roll", "nap", "explore", "greet_keeper", "hide", "chirp",
 };
 
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
@@ -109,17 +108,6 @@ void tank_glass_clamp(float *x, float *y, float m) {
 #ifndef TANK_CORNER_R
 #define corner_clamp(x, y, m) ((void)0)            /* the plain rectangle (and the bowl, which has its own): no corners */
 #endif
-/* a random point of open water: y in [y0, y1], x at least mx off the side glass at that height */
-static void rand_water(tank_t *t, float mx, float y0, float y1, float *x, float *y) {
-#if defined(TANK_ROUND) || defined(TANK_CORNER_R)
-    *y = tank_randf(t, y0, y1);
-    float lo = tank_glass_x0(*y) + mx, hi = tank_glass_x1(*y) - mx;
-    *x = lo < hi ? tank_randf(t, lo, hi) : TANK_W * 0.5f;
-#else
-    *x = tank_randf(t, mx, TANK_W - mx); *y = tank_randf(t, y0, y1);
-#endif
-}
-
 /* ---- the pod's surfaces (Trubbles, 2026-10-08): the floor and three
  * shelves, given in the rectangle's floor x (TANK_FLOOR_X) and as a fraction
  * of TANK_BOT, so the bowl and the watch get the same layout. The middle one
@@ -161,6 +149,48 @@ int tank_nearest_friend(const tank_t *t, int fish_idx, float *dist_out) {
     int best = -1; float bd = 1e9f;
     for (int i = 0; i < t->n_fish; i++) {
         if (i == fish_idx) continue;
+        float d = tank_dist(f->x, f->y, t->fish[i].x, t->fish[i].y);
+        if (d < bd) { bd = d; best = i; }
+    }
+    if (dist_out) *dist_out = bd;
+    return best;
+}
+
+/* ---- the pod's places and signals (Trubbles schema) ---- */
+/* the sleeping nook: a nest on the floor at the left end */
+void tank_nook(float *x, float *y) { *x = TANK_FX0 + 34; *y = FLOOR_Y - TRUB_R; }
+/* tuck-away spots: on the floor under each side shelf, against its wall end */
+int tank_hide_spot(const tank_t *t, int idx, float *x, float *y) {
+    const fish_t *f = &t->fish[idx];
+    float r = TRUB_R * f->size, best = 1e9f; int k = -1;
+    for (int i = 0; i < N_LEDGES; i += N_LEDGES - 1) {          /* the two side shelves */
+        float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
+        float hx = i == 0 ? x0 + r + 4 : x1 - r - 4;
+        if (fabsf(hx - f->x) < best) { best = fabsf(hx - f->x); *x = hx; k = i; }
+    }
+    *y = FLOOR_Y - r;
+    return k;
+}
+bool tank_keeper_near(const tank_t *t) { return t->keeper_s < KEEPER_NEAR_S; }
+bool tank_chorus(const tank_t *t, int idx) {
+    const fish_t *f = &t->fish[idx];
+    for (int i = 0; i < t->n_fish; i++)
+        if (i != idx && t->fish[i].chirp_s > 0 && tank_dist(f->x, f->y, t->fish[i].x, t->fish[i].y) < CHORUS_RANGE)
+            return true;
+    return false;
+}
+static bool touching(const fish_t *a, const fish_t *b) {
+    return tank_dist(a->x, a->y, b->x, b->y) < TRUB_R * (a->size + b->size) + 3;
+}
+int tank_nearest_pile(const tank_t *t, int idx, float *dist_out) {
+    const fish_t *f = &t->fish[idx];
+    int best = -1; float bd = 1e9f;
+    for (int i = 0; i < t->n_fish; i++) {
+        if (i == idx) continue;
+        bool piled = false;
+        for (int j = 0; j < t->n_fish && !piled; j++)
+            piled = j != i && j != idx && touching(&t->fish[i], &t->fish[j]);
+        if (!piled) continue;
         float d = tank_dist(f->x, f->y, t->fish[i].x, t->fish[i].y);
         if (d < bd) { bd = d; best = i; }
     }
@@ -268,6 +298,12 @@ void tank_make_fish(tank_t *t, int slot, int preset, float sociable, float bold,
     f->color = p->color; f->fin = p->fin; f->accent = p->accent;
     f->parent_a = f->parent_b = -1;
     f->vx = f->vy = 0; f->perch = PERCH_AIR; f->hop_cd = 0; f->squash = 0; f->roll = 0;
+    f->content = 5; f->crowd = 0; f->chirp_s = 0;
+    /* chatty from the roster slot and preset (no RNG draw, and a reload -
+       which remakes the Trubble from its preset - gets the same one) */
+    { uint32_t h = (uint32_t)(preset * 2654435761u) ^ (uint32_t)(slot * 40503u + 977u);
+      h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+      f->chatty = 0.15f + 0.7f * (float)(h & 1023) / 1023.0f; }
 }
 
 void tank_set_bubble_x(tank_t *t, float x) {
@@ -300,7 +336,10 @@ void tank_new_population(tank_t *t) {
      * (progression halved the stage clocks to match - 0.5/3/24 tended hours) */
     tank_make_fish(t, 0, a, sa, ba, STAGE_FRY);
     tank_make_fish(t, 1, b, sb, bb, STAGE_FRY);
-    t->n_fish = 2;
+    /* (Trubbles) the pod starts with N_FISH_START: one. The second is still
+       rolled - the same draws, so a seeded run is the run it was - and waits
+       in its slot, not alive, until an arrival takes the slot */
+    t->n_fish = N_FISH_START;
 }
 
 int tank_add_fish(tank_t *t, int parent_a, int parent_b) {
@@ -376,6 +415,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->tap_count = 0; t->tap_burst_t = 99; t->startled = false;
     t->startle_cooldown = 0;
     t->feed_spot_x = -1; t->player_feedings = 0; t->feed_open = false; t->hold_approaches = 0; t->greet_timer = 0;
+    t->keeper_s = 99; t->keeper_x = TANK_W * 0.5f;
     t->courting = false; t->court_a = t->court_b = -1;
     t->court_cool = 30; t->court_active = 0;
     t->spawning = false; t->spawn_danced = 0; t->ui_cover = false;
@@ -1409,14 +1449,16 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     t->plant_x = x; t->plant_z = (uint8_t)z;
 }
 
+/* the keeper touched the glass: `keeper near` for KEEPER_NEAR_S */
+static void keeper_touch(tank_t *t, float x) { t->keeper_s = 0; t->keeper_x = x; }
 void tank_touch_hold(tank_t *t, float x, float y) {
-    tank_handled(t);
+    tank_handled(t); keeper_touch(t, x);
     if (t->tool != TOOL_HAND) return;            /* a tool in hand: the glass takes its strokes and nothing else (2026-10-04) */
     t->hold_active = true; t->hold_x = x; t->hold_y = y;
 }
 
 void tank_touch_drag(tank_t *t, float x, float y) {
-    tank_handled(t);
+    tank_handled(t); keeper_touch(t, x);
     t->drag_active = true;
     if (!t->drag_has_prev) {
         /* stroke start: a slash must BEGIN on a plant - within SLASH_START_PX
@@ -1503,7 +1545,7 @@ static void tank_startle(tank_t *t, float x, float y) {
     for (int i = 0; i < t->n_fish; i++) {
         fish_t *f = &t->fish[i];
         if (tank_dist(f->x, f->y, x, y) < STARTLE_RADIUS) {
-            f->stress = fminf(10, f->stress + 2.5f);
+            f->stress = fminf(10, f->stress + 4.5f);   /* (Trubbles: a real fright - enough to hide a shy one) */
             f->trust = fmaxf(0, f->trust - 0.4f);
         }
     }
@@ -1524,7 +1566,7 @@ int tank_shrimp_tap(tank_t *t, float x, float y) {
     return t->shrimp_taps;
 }
 void tank_touch_tap(tank_t *t, float x, float y) {
-    tank_handled(t);
+    tank_handled(t); keeper_touch(t, x);
     if (t->tool != TOOL_HAND) return;            /* a tool in hand: no feed, no light, no startle - DONE first (2026-10-04) */
     if (y - tank_glass_top(x) < FEED_ZONE_Y) { tank_feed(t, x, 3); return; }     /* surface tap = feed (the bowl's surface is its top glass) */
     if (t->tap_burst_t > TAP_WINDOW) t->tap_count = 0;
@@ -1532,7 +1574,7 @@ void tank_touch_tap(tank_t *t, float x, float y) {
     tank_emit(TEV_TAP, -1);
     if (t->startled) {                              /* chasing: keep them spooked */
         t->startle_x = x; t->startle_y = y; t->startle_cooldown = STARTLE_COOLDOWN;
-        for (int i = 0; i < t->n_fish; i++) t->fish[i].stress = fminf(10, t->fish[i].stress + 0.6f);
+        for (int i = 0; i < t->n_fish; i++) t->fish[i].stress = fminf(10, t->fish[i].stress + 1.0f);
         shrimp_scatter(t, x, y, STARTLE_RADIUS);
     } else if (t->tap_count >= 3) tank_startle(t, x, y);   /* aggressive: engage */
 }
@@ -1574,7 +1616,13 @@ static void touch_tick(tank_t *t, float dt) {
              * finger used to be credited at 1.5 s without moving). The
              * tank's hold_approaches counter still counts the hold once. */
             if (draw_begins) f->hold_far = d >= HOLD_APPROACH_FROM;
-            if (f->hold_far && d < HOLD_APPROACH_AT) {
+            /* (Trubbles) bodies can't share the spot: one pressed against a
+               Trubble already under the finger has come as close as it can */
+            bool in = d < HOLD_APPROACH_AT;
+            for (int j = 0; j < t->n_fish && !in; j++)
+                in = j != i && touching(f, &t->fish[j]) &&
+                     tank_dist(t->fish[j].x, t->fish[j].y, t->hold_x, t->hold_y) < HOLD_APPROACH_AT;
+            if (f->hold_far && in) {
                 f->ms_bits |= MS_FIRST_HOLD_APPROACH;
                 if (!t->hold_approached) { t->hold_approached = true; t->hold_approaches++; tank_emit(TEV_INVESTIGATE, i); }
             }
@@ -1744,18 +1792,17 @@ typedef struct { float x, y, speed; bool valid; } target_t;
  * target, in which case nothing is mutated (no dart burst is started). */
 static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance) {
     fish_t *f = &t->fish[idx];
-    float tm = t->clock;
     target_t tg = {
         f->x + cosf(f->heading + sinf(f->wander) * 0.8f) * 50,
         f->y + sinf(f->heading + cosf(f->wander * 0.7f) * 0.45f) * 39,
         lerpf(12, 23, f->bold) * (1 - f->lazy * 0.35f), true,
     };
     switch (goal) {
-    case GOAL_SEEK_FOOD: {
+    case GOAL_EAT: {
         float d; int i = tank_nearest_food(t, f, &d);
         if (i >= 0) {
             /* hunger governs pursuit aggression regardless of which brain set
-             * the goal: a peckish fish saunters (~0.75x), a starving one
+             * the goal: a peckish Trubble saunters (~0.75x), a starving one
              * charges (~1.3x) and barely brakes on approach */
             float h = clampf(f->hunger / 10.0f, 0, 1);
             float slow = clampf(d / 60, 0.4f + h * 0.35f, 1);
@@ -1766,55 +1813,52 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         tg.valid = false;
         break;
     }
-    case GOAL_FLEE_SHADOW: {
-        /* the roaming shadow was removed 2026-09-13; the token stays in the
-         * frozen schema (the state line always reads `shadow none`, which the
-         * model was trained on). If it still says flee, the fish bolts away
-         * from the surface centre - the old no-shadow fallback. */
-        float sx = TANK_W * 0.5f, sy = -60;
-        float away = atan2f(f->y - sy, f->x - sx);
-        tg.x = f->x + cosf(away) * 105; tg.y = f->y + sinf(away) * 83;
-        tg.speed = lerpf(51, 83, f->bold);
-        break;
-    }
-    case GOAL_VISIT_BUBBLES:
-        /* each visitor keeps its own lane: a per-fish phase and radius, so
-         * four fish orbit the column instead of stacking on one point */
-        tg.x = t->bubble_x + sinf(tm * 1.2f + f->wander + idx * 1.9f) * (26 + idx * 6);
-        tg.y = t->bubble_y - 74 + cosf(tm * 0.8f + f->wander + idx * 1.3f) * (34 + idx * 6);
-        tg.speed = 23;
-        break;
-    case GOAL_FOLLOW_FRIEND: {
-        float d; int i = tank_nearest_friend(t, idx, &d);
+    case GOAL_CUDDLE: {
+        /* a pile if one is near, else the nearest friend: up against its side */
+        float d; int i = tank_nearest_pile(t, idx, &d);
+        if (i < 0 || d > 120) i = tank_nearest_friend(t, idx, &d);
         if (i >= 0) {
             const fish_t *fr = &t->fish[i];
-            float ang = atan2f(f->y - fr->y, f->x - fr->x) + sinf(tm + f->wander) * 0.35f;
-            tg.x = fr->x + cosf(ang) * 54; tg.y = fr->y + sinf(ang) * 34;   /* a body length off, not on top */
-            tg.speed = clampf(d - 40, 10, 42);
+            float side = f->x < fr->x ? -1.0f : 1.0f;
+            tg.x = fr->x + side * TRUB_R * (f->size + fr->size) * 0.85f; tg.y = fr->y;
+            tg.speed = clampf(d * 0.6f, 12, 45);
         } else tg.valid = false;
         break;
     }
-    case GOAL_REST:
-        tg.x = t->reef_x + 13 + f->rest_dx;
-        tg.y = TANK_BOT - 50 + f->rest_dy;
-        tg.speed = 6 + f->bold * 4;
-        break;
-    case GOAL_DART_PLAY:
+    case GOAL_ROLL:
+        /* bouncing about for fun: a new spot anywhere in the pod every second
+           or two, taken at a dash (the locomotion adds the bounces) */
         if (glance) { tg.valid = false; break; }
         if (f->dart_timer <= 0) {
-            rand_water(t, 38, 40, TANK_BOT - 64, &f->dart_x, &f->dart_y);
-            f->dart_timer = tank_randf(t, 0.8f, 1.5f);
+            f->dart_x = tank_randf(t, TANK_FX0 + 30, TANK_FX1 - 30);
+            f->dart_y = tank_randf(t, 40, TANK_BOT - 40);
+            f->dart_timer = tank_randf(t, 1.2f, 2.5f);
         }
         tg.x = f->dart_x; tg.y = f->dart_y;
-        tg.speed = lerpf(65, 95, f->bold);
+        tg.speed = lerpf(55, 85, f->bold);
         break;
-    case GOAL_INSPECT_REEF: {
-        float rx, ry; tank_reef_spot(t, &rx, &ry);   /* the reef cluster, once there is one */
-        tg.x = rx + sinf(tm * 0.65f + f->wander + idx * 1.7f) * (39 + idx * 4);
-        tg.y = ry - REEF_ORBIT_UP + cosf(tm * 0.8f + f->wander + idx * 1.1f) * (15 + idx * 4);
-        tg.speed = 15 + f->curiosity * 1.7f;
+    case GOAL_NAP:
+        /* to the nook, side by side; at night wherever it is */
+        if (t->night) { tg.x = f->x; tg.y = f->y; tg.speed = 0; return tg; }
+        tank_nook(&tg.x, &tg.y);
+        tg.x += idx * TRUB_R * 1.8f;
+        tg.speed = 22;
         break;
-    }
+    case GOAL_GREET_KEEPER:
+        /* to the glass where the keeper is (the middle when nobody is), where
+           it turns to face them and chirps */
+        tg.x = (tank_keeper_near(t) ? t->keeper_x : TANK_W * 0.5f) + (idx - t->n_fish * 0.5f) * 20;
+        tg.y = FLOOR_Y - TRUB_R * f->size;
+        tg.speed = 38;
+        break;
+    case GOAL_HIDE:
+        tank_hide_spot(t, idx, &tg.x, &tg.y);
+        tg.speed = lerpf(70, 50, f->bold);
+        return tg;
+    case GOAL_CHIRP:
+        /* sings where it is */
+        tg.x = f->x; tg.y = f->y; tg.speed = 0;
+        return tg;
     case GOAL_EXPLORE: {
         /* a destination, not a drift (2026-09-14). Before this, explore was
          * the wander target above - 50 px ahead of the nose with a wobble -
@@ -1881,8 +1925,10 @@ static void eat_nearby_food(tank_t *t, fish_t *f) {
                 if (t->feed_open) { t->player_feedings++; t->feed_open = false; }   /* the gesture became a meal */
             }
             /* post-meal reflex from the prototype */
-            if (f->hunger < 2.2f && f->goal.id == GOAL_SEEK_FOOD)
-                f->goal.id = (xr(t) & 1) ? GOAL_VISIT_BUBBLES : GOAL_EXPLORE;
+            f->content = clampf(f->content + 1.2f, 0, 10);
+            /* post-meal reflex: a full Trubble has a happy roll or wanders off */
+            if (f->hunger < 2.2f && f->goal.id == GOAL_EAT)
+                f->goal.id = (xr(t) & 1) ? GOAL_ROLL : GOAL_EXPLORE;
             return;   /* one bite per frame: a fish in a cloud of pellets takes
                          them one at a time, so a tank-mate gets a look in */
         }
@@ -1891,39 +1937,47 @@ static void eat_nearby_food(tank_t *t, fish_t *f) {
 
 static void update_fish(tank_t *t, int idx, float dt) {
     fish_t *f = &t->fish[idx];
-    /* drives (prototype rates, speed rescaled by the same 0.55) */
+    /* drives (Trubbles schema). The prototype's hunger and energy rates
+     * carry over; rolling about burns more of both, a nap restores energy
+     * and calms, and a Trubble tucked in its hiding spot calms fastest. */
+    goal_id_t gid = f->goal.id;
+    bool settled = f->perch != PERCH_AIR && fabsf(f->vx) < 4;
+    bool napping = gid == GOAL_NAP && settled;
+    bool tucked = false;
+    if (gid == GOAL_HIDE) { float hx, hy; tank_hide_spot(t, idx, &hx, &hy); tucked = fabsf(f->x - hx) < 10 && settled; }
     f->hunger    = clampf(f->hunger + dt * (HUNGER_PER_S + f->bold * HUNGER_BOLD_PER_S +
-                          (f->goal.id == GOAL_DART_PLAY ? HUNGER_DART_PER_S : 0)), 0, 10);
-    /* curiosity: exploring feeds it (prototype) and - new 2026-09-01 -
-     * satisfying it SPENDS it: a fish that has reached the bubbles or the
-     * reef uses curiosity up there, the way rest restores energy and a meal
-     * drops hunger. Before this a fed fish had no sink at all (+0.8 per
-     * pellet, nothing ever took it back), so after days the whole school sat
-     * at curiosity 9 and the advisor - reading "fed, calm, curious" exactly
-     * as trained - parked all four at the bubble column for good. The model
-     * still owns the goal; it just sees an honest drive, and the curiosity
-     * band is in the re-ask signature so it gets to react. */
+                          (gid == GOAL_ROLL ? HUNGER_DART_PER_S : 0)), 0, 10);
+    /* curiosity rises over idle time, faster with something new nearby
+     * (a pellet), and exploring spends it - so it never pins at the top */
     {
-        float dc = f->goal.id == GOAL_EXPLORE ? 0.08f : -0.025f;
-        if (f->goal.id == GOAL_VISIT_BUBBLES || f->goal.id == GOAL_INSPECT_REEF) {
-            bool bub = f->goal.id == GOAL_VISIT_BUBBLES;
-            float sx = t->bubble_x, sy = t->bubble_y - 74;
-            if (!bub) { tank_reef_spot(t, &sx, &sy); sy -= REEF_ORBIT_UP; }
-            bool at = tank_dist(f->x, f->y, sx, sy) < CURIOSITY_SPEND_RADIUS;
-            if (at) dc = -CURIOSITY_SPEND_PER_S;
-            if (bub && at && !f->at_bubbles) tank_emit(TEV_BUBBLES, idx);   /* arrival at the column: the play cue */
-            f->at_bubbles = bub && at;
-        } else f->at_bubbles = false;
+        float dc = gid == GOAL_EXPLORE ? -0.06f : 0.025f;
+        if (tank_nearest_food(t, f, 0) >= 0 && gid != GOAL_EAT) dc += 0.03f;
         f->curiosity = clampf(f->curiosity + dt * dc, 0, 10);
     }
-    f->stress    = clampf(f->stress - dt * (f->goal.id == GOAL_REST ? 0.48f : 0.18f), 0, 10);
-    /* energy: the prototype's per-second drain (full to empty in ~3 min of
-     * cruising) kept the school at energy ~3 - permanently tired, so the
-     * advisor never had a fish fit enough to dart and read every content
-     * fish as "relaxed": bubbles, reef, follow (2026-09-01 census). Now a
-     * fish cruises ~10 min on a full tank and a rest refills it in ~35 s. */
-    f->energy    = clampf(f->energy + dt * (f->goal.id == GOAL_REST ? 0.30f
-                          : -0.012f - f->speed / 4000.0f), 0, 10);
+    f->stress    = clampf(f->stress - dt * (tucked ? 0.60f : napping ? 0.48f : 0.18f), 0, 10);
+    /* energy: a Trubble rolls ~10 min on a full charge; a nap refills it in ~35 s */
+    f->energy    = clampf(f->energy + dt * (napping ? 0.30f
+                          : -0.012f - f->speed / 4000.0f - (gid == GOAL_ROLL ? 0.02f : 0)), 0, 10);
+    /* crowd: Trubbles within a few bodies, plus the colony against the pod's
+     * capacity; sustained crowding wears on it */
+    {
+        int near = 0;
+        for (int i = 0; i < t->n_fish; i++)
+            if (i != idx && tank_dist(f->x, f->y, t->fish[i].x, t->fish[i].y) < 70) near++;
+        f->crowd = clampf(near * 2.0f + 4.0f * t->n_fish / POD_CAPACITY, 0, 10);
+        if (f->crowd > 6) f->stress = clampf(f->stress + dt * 0.08f * (f->crowd - 6), 0, 10);
+    }
+    /* content: calm and company and the keeper's touch raise it, hunger and
+     * stress pull it down (a meal adds a lump: eat_nearby_food) */
+    {
+        bool snug = false;
+        if (gid == GOAL_CUDDLE)
+            for (int i = 0; i < t->n_fish && !snug; i++) snug = i != idx && touching(f, &t->fish[i]);
+        bool stroked = t->hold_active && tank_dist(f->x, f->y, t->hold_x, t->hold_y) < 40;
+        float dcon = (f->stress < 3 ? 0.05f : 0) + (snug ? 0.12f : 0) + (stroked ? 0.40f : 0)
+                   - (f->hunger > 6 ? 0.08f * (f->hunger - 6) : 0) - (f->stress > 5 ? 0.06f * (f->stress - 5) : 0);
+        f->content = clampf(f->content + dt * dcon, 0, 10);
+    }
     /* a canopy is a place to hide: a fish inside one calms faster (below) */
     bool hidden = false;
     for (int b = 0; b < tank_veg_beds(t) && !hidden; b++)
@@ -1972,8 +2026,8 @@ static void update_fish(tank_t *t, int idx, float dt) {
      * crossing into "bored" is re-asked - and the v4 model reads the value. */
     {
         goal_id_t g = f->goal.id;
-        bool leisure = g == GOAL_VISIT_BUBBLES || g == GOAL_FOLLOW_FRIEND || g == GOAL_INSPECT_REEF ||
-                       g == GOAL_DART_PLAY || g == GOAL_EXPLORE || (g == GOAL_REST && !t->night);
+        bool leisure = g == GOAL_CUDDLE || g == GOAL_ROLL || g == GOAL_EXPLORE || g == GOAL_CHIRP ||
+                       g == GOAL_GREET_KEEPER || (g == GOAL_NAP && !t->night);
         f->bored = clampf(f->bored + dt * (leisure ? BORED_PER_S : -BORED_RELIEF_PER_S), 0, 10);
         int z = zone_of(f->x, f->y);
         if (z != f->zone_last) {
@@ -2005,7 +2059,7 @@ static void update_fish(tank_t *t, int idx, float dt) {
     /* touch: spooked Trubbles bolt from the tap site; trusting ones come to a
      * resting finger (reflex-layer, independent of the advisor's goal) */
     float touch_speed = -1;
-    if (t->startled && f->goal.id != GOAL_FLEE_SHADOW) {
+    if (t->startled && f->goal.id != GOAL_HIDE) {
         float d = tank_dist(f->x, f->y, t->startle_x, t->startle_y);
         if (d < STARTLE_RADIUS * 1.6f) {
             float dx = f->x - t->startle_x;
@@ -2020,12 +2074,12 @@ static void update_fish(tank_t *t, int idx, float dt) {
         px = t->stage_x + cosf(ph) * 24; py = t->stage_y;
         touch_speed = tank_dist(f->x, f->y, t->stage_x, t->stage_y) > 80 ? 44 : 20;
     } else if (t->spawning && (idx == t->court_a || idx == t->court_b) &&
-               f->goal.id != GOAL_FLEE_SHADOW && !(t->ravenous && f->hunger > 6.5f)) {
+               f->goal.id != GOAL_HIDE && !(t->ravenous && f->hunger > 6.5f)) {
         /* the spawning (2026-09-24): outranks a resting finger and the
          * greeting; a starving parent still begs first */
         court_steer(t, f, idx, &px, &py, &touch_speed);
     } else if (t->hold_active && t->hold_time >= HOLD_ATTRACT_S &&
-               f->goal.id != GOAL_FLEE_SHADOW && f->trust >= 4.0f &&
+               f->goal.id != GOAL_HIDE && f->trust >= 4.0f &&
                f->hunger < HOLD_HUNGER_VETO) {
         /* only a settled hold (~3 s of contact) draws them in, and a strongly
          * hungry one has better things to do than visit a finger */
@@ -2036,12 +2090,12 @@ static void update_fish(tank_t *t, int idx, float dt) {
             float far = d > 120 ? 1.0f : d / 120.0f;
             touch_speed = d > 28 ? lerpf(14, 30, w) + far * lerpf(10, 20, w) : 4;
         }
-    } else if (t->greet_timer > 0 && f->trust >= 7.0f && f->goal.id != GOAL_FLEE_SHADOW &&
-               f->goal.id != GOAL_SEEK_FOOD) {
+    } else if (t->greet_timer > 0 && f->trust >= 7.0f && f->goal.id != GOAL_HIDE &&
+               f->goal.id != GOAL_EAT) {
         /* light-on greeting: trusting ones come up front to see who's there */
         px = TANK_W * 0.5f + (idx - t->n_fish * 0.5f) * 34; py = 70;
         touch_speed = tank_dist(f->x, f->y, px, py) > 24 ? 26 : 5;
-    } else if (t->ravenous && f->goal.id != GOAL_FLEE_SHADOW && f->hunger > 6.5f) {
+    } else if (t->ravenous && f->goal.id != GOAL_HIDE && f->hunger > 6.5f) {
         /* a starving pod: the advisor still owns the goal. Empty pod = beg
          * under the feed spot, rolling back and forth; live pellets = the
          * dash - a starving Trubble goes the moment food drops. */
@@ -2057,7 +2111,7 @@ static void update_fish(tank_t *t, int idx, float dt) {
         }
     } else if (t->court_active > 0 && !t->ravenous &&
                (idx == t->court_a || idx == t->court_b) &&
-               f->goal.id != GOAL_FLEE_SHADOW && f->hunger < HOLD_HUNGER_VETO) {
+               f->goal.id != GOAL_HIDE && f->hunger < HOLD_HUNGER_VETO) {
         /* the tell: an episode of the courtship circle */
         court_steer(t, f, idx, &px, &py, &touch_speed);
     }
@@ -2066,8 +2120,9 @@ static void update_fish(tank_t *t, int idx, float dt) {
     float ugain = 0.8f + f->goal.urgency * 0.05f;
     float want = touch_speed >= 0 ? touch_speed : hes_speed >= 0 ? hes_speed : tg.speed * ugain;
     if (f->energy < 1.2f) want *= 0.45f;
-    /* rolling through a canopy is slow going (a bolting Trubble crashes through) */
-    if (f->goal.id != GOAL_FLEE_SHADOW)
+    /* rolling through a canopy is slow going (a bolting, dashing or hiding
+       Trubble crashes through) */
+    if (f->goal.id != GOAL_HIDE && touch_speed < 55)
         for (int b = 0; b < tank_veg_beds(t); b++)
             if (veg_inside(t, b, f->x, f->y)) { want *= VEG_SLOW; break; }
     f->target_speed = want;
@@ -2148,6 +2203,11 @@ static void update_fish(tank_t *t, int idx, float dt) {
             if (fabsf(dx) < 2) vt = 0;
             f->vx += clampf(vt - f->vx, -260 * dt, 260 * dt);
             if (on_friend) f->vy = fminf(f->vy, 0);
+            /* rolling for fun: it bounces as it goes, a hop every second or so */
+            if (f->goal.id == GOAL_ROLL && f->hop_cd <= 0 && tank_randf(t, 0, 1) < 1.2f * dt) {
+                f->vy = -sqrtf(2 * GRAVITY * tank_randf(t, 25, 55));
+                f->perch = PERCH_AIR; f->hop_cd = 0.5f;
+            }
         }
     }
     if (f->perch == PERCH_AIR) f->vy += GRAVITY * dt;
@@ -2181,12 +2241,18 @@ static void update_fish(tank_t *t, int idx, float dt) {
         }
     }
 
-    /* facing follows the roll; the yaw turns toward it as the fish's did */
+    /* facing follows the roll; the yaw turns toward it as the fish's did.
+     * Greeting the keeper or singing, once still, it turns to face out of
+     * the glass (yaw 0: both eyes on the keeper) */
     if (f->vx > 8) f->facing = 1; else if (f->vx < -8) f->facing = -1;
     if (!f->facing) f->facing = 1;
     f->behind = 0;
+    bool still = f->perch != PERCH_AIR && fabsf(f->vx) < 6 && fabsf(land_x - f->x) < 12;
+    bool front = still && (f->goal.id == GOAL_GREET_KEEPER || f->goal.id == GOAL_CHIRP);
     float yrate = f->turn_rate * 1.2f * (1 + f->goal.urgency * 0.06f) * dt;
-    f->yaw += clampf(f->facing - f->yaw, -yrate, yrate);
+    f->yaw += clampf((front ? 0 : f->facing) - f->yaw, -yrate, yrate);
+    /* singing: a chirp, or a greeting that has arrived */
+    f->chirp_s = front ? f->chirp_s + dt : 0;
     f->yaw_tail += (f->yaw - f->yaw_tail) * clampf(dt * 10, 0, 1);
     f->heading = f->facing > 0 ? 0 : 3.14159f;
     f->speed = fabsf(f->vx);
@@ -2226,7 +2292,11 @@ static uint32_t state_signature(const tank_t *t, int idx) {
     return (uint32_t)band3(f->hunger) | (uint32_t)band3(f->energy) << 2 | (uint32_t)band3(f->stress) << 4
          | (uint32_t)food << 6
          | (uint32_t)t->night << 10 | (uint32_t)band3(f->curiosity) << 11
-         | (uint32_t)band3(f->bored) << 13;      /* a fish going stale is asked again (2026-09-14) */
+         | (uint32_t)band3(f->bored) << 13       /* a fish going stale is asked again (2026-09-14) */
+         /* Trubbles: the keeper arriving, a chorus starting, the colony
+            crowding in and a mood turning are reasons to re-decide */
+         | (uint32_t)tank_keeper_near(t) << 15 | (uint32_t)tank_chorus(t, idx) << 16
+         | (uint32_t)band3(f->crowd) << 17 | (uint32_t)band3(f->content) << 19;
 }
 
 /* would moving f by dx put it past the end of the shelf it stands on? */
@@ -2238,6 +2308,7 @@ static bool ledge_pinned(const fish_t *f, float dx) {
 
 void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     t->clock += dt;
+    t->keeper_s += dt;
     /* the light: on while the device is handled, off LIGHT_IDLE_S after the
      * last touch or movement (tank_handled) - a tank left on the desk goes
      * dark and the fish sleep. A setup page or a prompt holds it on; the
@@ -2340,7 +2411,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
             uint32_t sig = state_signature(t, i);
             /* prototype's urgent path: starving with food in view gets
              * asked NOW instead of waiting its turn */
-            bool urgent = f->hunger > 8.0f && f->goal.id != GOAL_SEEK_FOOD &&
+            bool urgent = f->hunger > 8.0f && f->goal.id != GOAL_EAT &&
                           f->goal_age > 0.8f && tank_nearest_food(t, f, 0) >= 0;
             bool changed = sig != f->sig && f->ask_age > ADVISOR_MIN_INTERVAL;
             bool idle = f->ask_age > ADVISOR_IDLE_CEILING;
@@ -2359,7 +2430,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
                 f->goal = g;
                 f->goal_age = 0;
                 /* visible deliberation, scaled by how torn the advisor was */
-                bool calm = g.id != GOAL_FLEE_SHADOW && g.urgency < 8 && g.confidence < 0.6f;
+                bool calm = g.id != GOAL_HIDE && g.urgency < 8 && g.confidence < 0.6f;
                 f->hesitate = calm ? (0.6f - g.confidence) * 2.5f : 0;
             } else if (g.id == f->goal.id) {
                 f->goal.urgency = g.urgency;
@@ -2375,13 +2446,13 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
      * diagnostic, never changes a goal. */
     for (int i = 0; i < t->n_fish; i++) {
         fish_t *f = &t->fish[i];
-        if (f->hunger > 8.5f && f->goal.id != GOAL_SEEK_FOOD &&
-            f->goal.id != GOAL_FLEE_SHADOW && f->goal_age > 4.0f &&
+        if (f->hunger > 8.5f && f->goal.id != GOAL_EAT &&
+            f->goal.id != GOAL_HIDE && f->goal_age > 4.0f &&
             !f->starve_flagged && tank_nearest_food(t, f, 0) >= 0) {
             f->starve_flagged = true;          /* count once per episode */
             tank_reflex_overrides++;
         }
-        if (f->goal.id == GOAL_SEEK_FOOD || f->hunger < 8.0f) f->starve_flagged = false;
+        if (f->goal.id == GOAL_EAT || f->hunger < 8.0f) f->starve_flagged = false;
     }
 
     for (int i = 0; i < t->n_fish; i++) update_fish(t, i, dt);
