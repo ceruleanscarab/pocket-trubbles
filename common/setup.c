@@ -763,9 +763,11 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, 116, C_PANEL, 150);
         text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW PIP!");
         char l1[FISH_NAME_MAX * 2 + 24];
-        snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
+        bool bud = f->parent_a >= 0 && f->parent_a == f->parent_b;   /* (Trubbles: one parent) */
+        if (bud) snprintf(l1, sizeof l1, "BUDDED FROM %s", fish_name(t, f->parent_a));
+        else snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
         text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
-        text_c(fb, stride, CX, 162, 2, C_CAPT, "DOWN IN THE GRASS.");
+        text_c(fb, stride, CX, 162, 2, C_CAPT, bud ? "RIGHT BESIDE IT." : "DOWN IN THE GRASS.");
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
         dots(fb, stride, PAGE_H - 14);
@@ -793,7 +795,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "MARKINGS");
         render_rect(fb, stride, vx, y - 1, 16, 16, f->accent); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
         text_named(fb, stride, vx + 24, y, "FROM ", nb, cb, NULL);
-        static const char *const TRAIT[2] = { "BOLD", "SOCIAL" };
+        static const char *const TRAIT[2] = { "BOLD", "CUDDLY" };   /* (sociable is the schema's cuddly) */
         for (int k = 0; k < 2; k++) {                                /* the fry's own bar, the parents' ticks */
             y += SETUP_FAM_ROW_DY;
             float v = k ? f->sociable : f->bold;
@@ -810,9 +812,10 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             }
         }
         y += SETUP_FAM_ROW_DY;
-        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "PARENTS");
+        bool bud = pa && pa == pb;                                  /* (Trubbles: a bud has one parent) */
+        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, bud ? "PARENT" : "PARENTS");
         render_text(fb, stride, vx, y, 2, ca, na);
-        render_text(fb, stride, vx + render_text_w(na, 2) + 16, y, 2, cb, nb);
+        if (!bud) render_text(fb, stride, vx + render_text_w(na, 2) + 16, y, 2, cb, nb);
         nav(fb, stride, false, "DONE", true);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else {                                                        /* SETUP_PG_CARE */

@@ -157,6 +157,12 @@ typedef struct {
      * which every build wrote as zeros - still 1688 B; older saves read 0
      * and get the notice once. */
     uint8_t  light_tip_seen, pad_tip[3];
+    /* the Trubbles tail (2026-10-08, budding): each one's chatty trait (0 =
+     * an older save: keep the one tank_make_fish derives from the slot - a
+     * real one is never 0) and its banked content seconds toward a bud
+     * (older saves: nothing banked) */
+    float    chatty[N_FISH_MAX];
+    float    bud_s[N_FISH_MAX];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -238,7 +244,9 @@ SAVE_AT(urchin_x, 1676); SAVE_AT(urchin_grazed_px, 1680);                       
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(light_tip_seen, 1684); SAVE_AT(pad_tip, 1685);                                                 /* the lights-out notice, 10-03 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
-/* (the next field: SAVE_AT(its_name, 1688 or its type's alignment past it);) */
+SAVE_AT(chatty, 1688); SAVE_AT(bud_s, 1712);                                                           /* Trubbles budding, 10-08 */
+_Static_assert(sizeof(save_t) >= 1736, "SAVE LAYOUT LOCK: save_t only ever grows");
+/* (the next field: SAVE_AT(its_name, 1736 or its type's alignment past it);) */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
  * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
  * entries of 32 B, and NVS keeps one page free for its garbage collection:
@@ -249,8 +257,8 @@ _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows
  * is 3 x ~128 = ~390 entries, plus ~10 for the settings, "bat"/"hist" and
  * the batlog's "bed": under 2/3 of the 630, so GC always has room. Past it,
  * saves can start failing for space, and any nvs_flash_init error makes
- * main.c ERASE the partition. 1688 B today (the urchin, 2026-10-02: its x and its tally after the
- * watch's way up; ~54 entries a copy): 2312 B of headroom. */
+ * main.c ERASE the partition. 1736 B today (the Trubbles tail, 2026-10-08: chatty and the
+ * bud bank; ~55 entries a copy): 2264 B of headroom. */
 #define SAVE_NVS_BUDGET 4000
 _Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
 
@@ -730,8 +738,9 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         f->ms_seen = sv.ms_seen[i] & f->ms_bits;
         f->rest_dx = s->rest_dx; f->rest_dy = s->rest_dy;
         f->drift_acc = sv.drift_acc[i];
+        if (sv.chatty[i] > 0) f->chatty = sv.chatty[i];
+        s_bud[i] = sv.bud_s[i] < 0 ? 0 : sv.bud_s[i] > BUD_CONTENT_S ? BUD_CONTENT_S : sv.bud_s[i];
         s_age[i] = s->age_s;
-        s_bud[i] = 0;                        /* (budding's bank is not saved yet: a boot starts it over) */
         t->n_fish = i + 1;
         if (sv.names[i][0]) { sv.names[i][FISH_NAME_MAX] = 0; tank_set_name(t, i, sv.names[i]); }
         tank_set_look(t, i, sv.body[i], sv.accent[i]);        /* zeros keep the preset's */
@@ -1054,6 +1063,7 @@ bool progression_save(tank_t *t) {
         s->eaten = f->eaten; s->eaten_player = f->eaten_player; s->ms_bits = f->ms_bits;
         sv.ms_seen[i] = f->ms_seen;
         sv.drift_acc[i] = f->drift_acc;
+        sv.chatty[i] = f->chatty; sv.bud_s[i] = s_bud[i];
     }
     if (!persist_port_save(&sv, sizeof sv)) {
         if (!s_dirty) { s_dirty = true; s_dirty_since = 0; }

@@ -154,7 +154,7 @@ enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, 
  * parent, not a pair: a fluff (adult or elder) banks lit seconds at content
  * >= BUD_CONTENT, losing them at BUD_DRAIN of the rate below it, and
  * BUD_CONTENT_S banked is the CONTENT care gate. The fluff with the most is
- * the parent. Not saved yet: a boot starts the count over. */
+ * the parent. Saved (the Trubbles tail). */
 #define BUD_CONTENT    8.0f
 #define BUD_CONTENT_S  600.0f
 #define BUD_DRAIN      0.25f

@@ -364,6 +364,20 @@ int tank_add_fish(tank_t *t, int parent_a, int parent_b) {
        which; tank_set_look keeps the markings off a matching body */
     if (tank_randf(t, 0, 1) < 0.5f) { int x = ia; ia = ib; ib = x; pa = &t->fish[ia]; pb = &t->fish[ib]; }
     tank_set_look(t, slot, pa->color, pb->accent);
+    if (ia == ib) {
+        /* a bud (Trubbles, 2026-10-08; trubbles_schema.md: "a blend of the
+           parent's traits with a little random drift"): one parent's bold,
+           cuddly and chatty, each nudged a little, and its look with the
+           tint nudged too - a family looks like a family, never a copy */
+        fish_t *f = &t->fish[slot];
+        f->bold = f->bold0 = clampf(pa->bold + tank_randf(t, -0.1f, 0.1f), 0.05f, 0.95f);
+        f->sociable = f->sociable0 = clampf(pa->sociable + tank_randf(t, -0.1f, 0.1f), 0.05f, 0.95f);
+        f->chatty = clampf(pa->chatty + tank_randf(t, -0.1f, 0.1f), 0.05f, 0.95f);
+        uint32_t c = 0;
+        for (int sh = 0; sh <= 16; sh += 8)
+            c |= (uint32_t)clampf((float)((pa->color >> sh) & 255) + tank_randf(t, -14, 14), 0, 255) << sh;
+        tank_set_look(t, slot, c, pa->accent);
+    }
     t->fish[slot].parent_a = (int8_t)ia; t->fish[slot].parent_b = (int8_t)ib;
     place_near_reef(t, &t->fish[slot]);
     t->fish[slot].hunger = 4; t->fish[slot].trust = 4;

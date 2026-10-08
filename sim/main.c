@@ -287,6 +287,24 @@ static int selftest_spawn(void) {
         if (f->stage != STAGE_FRY) { printf("FAIL: the bud is not a pip (stage %d)\n", f->stage); return 1; }
         if (progression_bud_s(0) > 1.0f) { printf("FAIL: the parent kept its banked content (%.0f s)\n", progression_bud_s(0)); return 1; }
         if (progression_newborn() != tank.n_fish - 1 || progression_arrival_pending()) { printf("FAIL: the bud left the debt / staging wrong\n"); return 1; }
+        /* inheritance: one parent's traits and look, each nudged a little */
+        float db = fabsf(f->bold - p->bold), dc = fabsf(f->sociable - p->sociable), dt = fabsf(f->chatty - p->chatty);
+        int dcol = 0;
+        for (int sh = 0; sh <= 16; sh += 8) { int d = abs((int)((f->color >> sh) & 255) - (int)((p->color >> sh) & 255)); if (d > dcol) dcol = d; }
+        printf("selftest-pop: the pip inherits: bold %.2f/%.2f cuddly %.2f/%.2f chatty %.2f/%.2f, tint off by %d, markings %s\n",
+               f->bold, p->bold, f->sociable, p->sociable, f->chatty, p->chatty, dcol, f->accent == p->accent ? "its parent's" : "not its parent's");
+        if (db > 0.1001f || dc > 0.1001f || dt > 0.1001f) { printf("FAIL: the pip's traits drifted more than 0.1 from its parent's\n"); return 1; }
+        if (dcol > 14) { printf("FAIL: the pip's tint is %d off its parent's (want <= 14)\n", dcol); return 1; }
+    }
+    /* the save keeps a bud's chatty (no longer the slot's) and a fluff's banked content */
+    {
+        int nb = tank.n_fish - 1; float chatty = tank.fish[nb].chatty;
+        progression_set_bud(0, 300);
+        progression_save(&tank);
+        tank_init(&tank, 45); progression_boot(&tank);
+        if (tank.n_fish != n0 + 1 || fabsf(tank.fish[nb].chatty - chatty) > 1e-4f || fabsf(progression_bud_s(0) - 300) > 0.01f) {
+            printf("FAIL: the reload lost the pip's chatty (%.3f, was %.3f) or the bank (%.1f, was 300)\n", tank.fish[nb].chatty, chatty, progression_bud_s(0)); return 1; }
+        printf("selftest-pop: saved and reloaded: the pip's chatty %.2f and the fluff's 300 s banked kept\n", chatty);
     }
     bud_tick(60 * 2);
     if (tank.bud_parent != -1) { printf("FAIL: the budding moment did not end\n"); return 1; }
@@ -507,7 +525,12 @@ static int selftest_pop(void) {
         const fish_t *f = &tank.fish[nb];
         if (f->parent_a < 0 || f->parent_b < 0 || f->parent_a >= nb || f->parent_b >= nb) { printf("FAIL: newborn parents %d/%d\n", f->parent_a, f->parent_b); return 1; }
         const fish_t *pa = &tank.fish[f->parent_a], *pb = &tank.fish[f->parent_b];
-        if (f->color != pa->color || (f->accent != pb->accent && pb->accent != pa->color)) {   /* (markings step aside from a matching body) */
+        /* (Trubbles) a bud - one parent - wears that parent's tint nudged by up
+           to 14 a channel; a pair's newborn the body's exact colour */
+        int dcol = 0;
+        for (int sh = 0; sh <= 16; sh += 8) { int d = abs((int)((f->color >> sh) & 255) - (int)((pa->color >> sh) & 255)); if (d > dcol) dcol = d; }
+        bool body_ok = f->parent_a == f->parent_b ? dcol <= 14 : f->color == pa->color;
+        if (!body_ok || (f->accent != pb->accent && pb->accent != pa->color)) {   /* (markings step aside from a matching body) */
             printf("FAIL: newborn look %06x/%06x is not %s's body + %s's markings (%06x/%06x)\n", f->color, f->accent, pa->name, pb->name, pa->color, pb->accent); return 1;
         }
         printf("  newborn %s: body from %s, markings from %s, bold %.2f (%.2f/%.2f) social %.2f (%.2f/%.2f)\n", f->name, pa->name, pb->name,
@@ -1112,7 +1135,7 @@ static int selftest_sleep(void) {
 #ifndef _MSC_VER
 #include <dirent.h>
 static const size_t SAVE_CUTS[] = { 448, 1112, 1304, 1408, 1432, 1440, 1456, 1480, 1608, 1616, 1624, 1640, 1656, 1664, 1672, 1680, 1688 };
-#define SAVE_NOW 1688                    /* today's sizeof(save_t): the urchin, 2026-10-02 (its x and its tally) */
+#define SAVE_NOW 1736                    /* today's sizeof(save_t): the Trubbles tail, 2026-10-08 (chatty, the bud bank) */
 static uint32_t sv_u32(const uint8_t *e, size_t off) { uint32_t v; memcpy(&v, e + off, 4); return v; }
 static float    sv_f32(const uint8_t *e, size_t off) { float v; memcpy(&v, e + off, 4); return v; }
 static int name_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
