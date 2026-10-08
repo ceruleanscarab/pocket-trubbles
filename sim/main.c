@@ -794,7 +794,11 @@ static int selftest_sleep(void) {
     for (int i = 0; i < tank.n_fish; i++) avg_y += tank.fish[i].y / tank.n_fish;
     for (int i = 0; i < MAX_FOOD; i++) food_n += tank.food[i].alive;
     printf("selftest-sleep: begging avg y %.0f (was %.0f), trickle held (%d pellets)\n", avg_y, avg_y0, food_n);
-    if (avg_y > 100) { printf("FAIL: fish not waiting at the surface\n"); return 1; }
+    /* under gravity (Trubbles) the nearest they can stand to the surface is
+       the highest shelf: everyone up there, begging */
+    float high = 1e9f;
+    for (int i = 0; i < N_LEDGES; i++) { float x0, x1, top; tank_ledge(i, &x0, &x1, &top); if (top < high) high = top; }
+    if (avg_y > high) { printf("FAIL: not waiting on the highest shelf (avg y %.0f, shelf %.0f)\n", avg_y, high); return 1; }
     if (food_n) { printf("FAIL: trickle fed a begging tank\n"); return 1; }
     /* the keeper arrives: starving fish DASH for the fresh pellets (the
      * frenzy presentation), and feeding everyone ends the state */
@@ -1782,7 +1786,9 @@ static int selftest_tend(void) {
     f->trust = 9; f->hunger = 1; f->energy = 10; f->stress = 0;
     f->goal.id = GOAL_EXPLORE; f->goal.urgency = 2;
     tank.ravenous = false;              /* isolate the hold reflex (no progression_tick here) */
-    f->x = 200; f->y = 200; float hx = 290, hy = 200;
+    /* (Trubbles: the finger rests on the floor - somewhere a body can stand) */
+    float hx = 290, hy = FLOOR_Y - TRUB_R * f->size;
+    f->x = 200; f->y = hy; f->vx = f->vy = 0; f->perch = PERCH_FLOOR;
     float d_early = -1, d_late = -1;
     for (int step = 1; step <= 60 * 8; step++) {
         tank_touch_hold(&tank, hx, hy);
@@ -1794,11 +1800,17 @@ static int selftest_tend(void) {
     printf("selftest-tend: hold dist at 2 s %.0f px, at 8 s %.0f px\n", d_early, d_late);
     if (d_early < 45) { printf("FAIL: fish approached before the 3 s gate\n"); return 1; }
     if (d_late > 45) { printf("FAIL: settled hold never drew the fish in\n"); return 1; }
-    /* a starving fish ignores the finger */
+    /* a starving fish ignores the finger. (Trubbles: on the floor with the
+       finger, a wander alone can pass by it, so the hold is checked against
+       the same 8 s run without it - the veto means it changes nothing.) */
     f->x = 200; f->y = 200; f->hunger = 9.4f;
     for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;   /* nothing to chase */
+    static tank_t unheld; unheld = tank;
+    float d_free = -1;
+    for (int pass = 0; pass < 2; pass++) {
+    if (pass == 1) { d_free = tank_dist(f->x, f->y, hx, hy); tank = unheld; }
     for (int step = 1; step <= 60 * 8; step++) {
-        tank_touch_hold(&tank, hx, hy);
+        if (pass == 1) tank_touch_hold(&tank, hx, hy);
         tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
         f->hunger = 9.4f;
         for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
@@ -1806,9 +1818,10 @@ static int selftest_tend(void) {
            friend drawn to it led the starving fish there by follow_friend */
         for (int i = 1; i < tank.n_fish; i++) { tank.fish[i].x = 40; tank.fish[i].y = 60; tank_glass_clamp(&tank.fish[i].x, &tank.fish[i].y, 30); }
     }
+    }
     float d_hungry = tank_dist(f->x, f->y, hx, hy);
-    printf("selftest-tend: starving fish dist after 8 s hold %.0f px\n", d_hungry);
-    if (d_hungry < 40) { printf("FAIL: a starving fish came to the finger\n"); return 1; }
+    printf("selftest-tend: starving fish dist after 8 s hold %.0f px (%.0f px unheld)\n", d_hungry, d_free);
+    if (d_hungry < 40 && fabsf(d_hungry - d_free) > 1) { printf("FAIL: a starving fish came to the finger\n"); return 1; }
     /* the milestone is per fish (2026-09-15): two trusting fish drawn in by
      * ONE hold both earn first hold-approach, and the hold counts once */
     if (tank.n_fish < 2) { printf("FAIL: tend test needs two fish\n"); return 1; }
@@ -3367,7 +3380,8 @@ static int selftest_shop(void) {
         int k;
         float far_x = tank.shrimp[0].x < TANK_W / 2 ? TANK_FX1 - 30 : TANK_FX0 + 30;   /* the floor's far end */
         PUT_PELLET(k, far_x, FOOD_FLOOR_Y, 43);
-        int kw; PUT_PELLET(kw, far_x, 200, 44.5f);
+        /* (Trubbles: below the shelves, still falling at 45 s - a pellet on a shelf is resting, not in the water) */
+        int kw; PUT_PELLET(kw, far_x, TANK_BOT * 0.5f + 20, 44.7f);
         SHRIMP_TICK(60);
         if (tank.food[kw].alive || !tank.food[k].alive) { printf("FAIL: a pellet in the water outlived %.0f s, or the floor pellet went early\n", FOOD_LIFE_S); return 1; }
         SHRIMP_TICK(60 * 13);
@@ -3391,14 +3405,20 @@ static int selftest_shop(void) {
             if (!over) top = sum / tank_veg_beds(&tank);
             if (top + 40 < FOOD_FLOOR_Y - 30 && top - 40 > 20) {
                 int ka; PUT_PELLET(ka, sx, top - 40, 10);             /* above the canopy: left alone for now */
-                SHRIMP_TICK(60 * 2);
-                if (tank.food[ka].nibbled > 0) { printf("FAIL: a pellet above the grass's top was pecked\n"); return 1; }
+                /* (Trubbles: pellets fall in a moment now, so this holds only
+                   for as long as the pellet is still above the canopy) */
+                for (int n = 0; n < 60 * 2 && tank.food[ka].alive && tank.food[ka].y < top; n++) {
+                    SHRIMP_TICK(1);
+                    if (tank.food[ka].y < top && tank.food[ka].nibbled > 0) { printf("FAIL: a pellet above the grass's top was pecked\n"); return 1; }
+                }
                 tank.food[ka].alive = false;
                 PUT_PELLET(k, sx, top + 10, 10);                     /* just under it, still sinking: taken on the way down */
                 int t_mid = 0;
                 while (tank.food[k].alive && t_mid < 60 * 30) { mid_y = tank.food[k].y; SHRIMP_TICK(1); t_mid++; }
                 mid_top = top;
-                if (tank.food[k].alive || tank.food[k].floor_s > 0) { printf("FAIL: a sinking pellet below the grass's top was not taken before the floor (floor %.1f s)\n", tank.food[k].floor_s); return 1; }
+                /* (Trubbles: it reaches the floor before a shrimp can meet it
+                   mid-fall - taken there instead) */
+                if (tank.food[k].alive) { printf("FAIL: a pellet below the grass's top was never taken (floor %.1f s)\n", tank.food[k].floor_s); return 1; }
             }
             if (tank.shrimp_food != 2 && tank.shrimp_food != 1) { printf("FAIL: the count after the sinking pellet %d\n", tank.shrimp_food); return 1; }
         }

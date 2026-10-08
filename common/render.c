@@ -190,102 +190,112 @@ static uint32_t mix(uint32_t a, uint32_t b, float p) {
 }
 
 
-/* the turn (2026-09-29, was a roll that flattened the fish to a line): the
- * fish's yaw (tank.c) FORESHORTENS it along its length - side-on at +-1,
- * head-on at 0 - and the sign mirrors it, so its back stays up. The head's
- * yaw leads and the tail's follows, blended along the body, so mid-turn it
- * bends. Eased here so the swing starts and lands softly. */
-static float yaw_ease(float y) { return y * (1.5f - 0.5f * y * y); }
-#define YAW_MIN 0.06f                    /* the outline never folds to a line (the body's
-                                         * thickness is drawn on its own: FISH_THICK) */
-#define FISH_THICK 4.2f                  /* half the body's thickness, local px: turned toward
-                                         * the glass a fish shows a rounded oval, not a card */
-/* the yaw at body point lx: the tail's at the tail tip (-26), the head's at the nose (16) */
-static float yaw_at(float yh, float yt, float lx) {
-    float u = (lx + 26) * (1.0f / 42);
-    u = u < 0 ? 0 : u > 1 ? 1 : u;
-    float s = yt + (yh - yt) * u;
-    if (s > -YAW_MIN && s < YAW_MIN) s = s < 0 ? -YAW_MIN : YAW_MIN;
-    return s;
+/* ---- the Trubble (2026-10-08): a fuzzy ball - a disc ringed with fur tufts
+ * that turn as it rolls - with two big eyes and two tiny feet. Its fur is
+ * its mood: warm and bright when content, pale when hungry, dim when sleepy,
+ * dark and flattened when stressed; f->color is the individual's own tint
+ * underneath. All procedural, as the fish were. */
+static float trub_hash(int i, int k) {
+    uint32_t x = (uint32_t)i * 374761393u + (uint32_t)k * 668265263u;
+    x = (x ^ (x >> 13)) * 1274126177u;
+    return (float)((x ^ (x >> 16)) & 0xffff) / 65535.0f;
+}
+static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+/* contentment until the drive exists (schema field `content`, step 3): fed,
+ * calm and rested */
+static float trub_content(const fish_t *f) {
+    return clamp01((7 - f->hunger) / 5) * clamp01((6 - f->stress) / 5) * clamp01(f->energy / 5);
+}
+static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drowsy) {
+    float hungry = clamp01((f->hunger - 5) / 4);
+    float stress = clamp01((f->stress - 3) / 5);
+    float sleepy = asleep ? 1 : clamp01((4 - f->energy) / 4);
+    float content = trub_content(f);
+    uint32_t c = f->color;
+    c = mix(c, 0xffc46b, 0.50f * content);             /* warm */
+    c = mix(c, 0xffffff, 0.20f * content);             /* ... and bright */
+    c = mix(c, 0xd9d6cf, 0.55f * hungry);              /* pale */
+    c = mix(c, 0x2b2333, 0.65f * stress);              /* dark */
+    c = mix(c, 0x3c4250, 0.45f * sleepy);              /* dim: muted ... */
+    c = mix(c, 0x000000, 0.30f * sleepy);              /* ... and darker */
+    *flat = stress; *drowsy = sleepy;
+    return c;
+}
+static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool asleep) {
+    float R = TRUB_R * f->size, flat, drowsy;
+    uint32_t fur = trub_fur(f, asleep, &flat, &drowsy);
+    uint32_t fur_dark = mix(fur, 0x000000, 0.35f), fur_lite = mix(fur, 0xffffff, 0.35f);
+    /* squash on landing, stretch in the air, a slow breath at rest; stress
+       presses it flat. The feet stay on the ground: the body sinks to them. */
+    bool air = f->perch == PERCH_AIR;
+    float breathe = air ? 0 : sinf(clock * (asleep ? 1.4f : 2.2f) + f->wander) * 0.025f;
+    float stretch = air ? fminf(fabsf(f->vy) / 900.0f, 0.18f) : 0;
+    float sy = (1 + breathe + stretch) * (1 - 0.28f * f->squash) * (1 - 0.22f * flat);
+    float sx = (1 - breathe * 0.5f - stretch * 0.6f) * (1 + 0.22f * f->squash) * (1 + 0.14f * flat);
+    float rx = R * sx, ry = R * sy;
+    float bot = f->y + R, cx = f->x, cy = bot - 0.16f * R - ry;   /* standing on its feet */
+    float face = f->yaw;                               /* -1 left .. +1 right */
+
+    /* feet: two little ovals under the body, stepping while it rolls,
+       tucked up in a hop */
+    uint32_t foot = mix(fur, 0x2a1c18, 0.70f);
+    for (int k = 0; k < 2; k++) {
+        float side = k ? 1.0f : -1.0f;
+        float lift = air ? 0.12f * R
+                   : fabsf(f->vx) > 5 ? fmaxf(0, sinf(f->roll * 1.6f + k * 3.14159f)) * 0.16f * R : 0;
+        fill_ellipse(c, cx + side * 0.38f * rx + face * 0.12f * R, bot - 0.17f * R - lift,
+                     0.30f * R, 0.17f * R, foot, 255);
+    }
+    /* fur: tufts round the rim, turning with the roll; shorter underneath
+       (it sits on them) and laid flat by stress */
+    {
+        const int N = 22;
+        for (int i = 0; i < N; i++) {
+            float a = f->roll + i * (6.2831853f / N);
+            float ca = cosf(a), sa = sinf(a);
+            float under = clamp01((sa - 0.35f) / 0.5f);   /* +y is down */
+            float len = (0.16f + 0.14f * trub_hash(i, f->preset + 7)) * (1 - 0.75f * under) * (1 - 0.6f * flat);
+            float hw = 3.14159f / N * 1.15f;
+            float a0 = a - hw, a1 = a + hw;
+            float xs[3] = { cx + cosf(a0) * rx * 0.92f, cx + ca * rx * (1 + len), cx + cosf(a1) * rx * 0.92f };
+            float ys[3] = { cy + sinf(a0) * ry * 0.92f, cy + sa * ry * (1 + len), cy + sinf(a1) * ry * 0.92f };
+            fill_poly(c, xs, ys, 3, (i & 1) ? fur_dark : fur);
+        }
+    }
+    /* the ball, and a soft light on its upper side */
+    fill_ellipse(c, cx, cy, rx, ry, fur, 255);
+    fill_ellipse(c, cx - 0.22f * rx, cy - 0.30f * ry, rx * 0.55f, ry * 0.42f, fur_lite, 70);
+    fill_ellipse(c, cx, cy + 0.55f * ry, rx * 0.75f, ry * 0.30f, fur_dark, 60);
+    /* eyes: big, set toward the way it faces; shut to a lid line asleep.
+       A stressed Trubble's eyes go wide and its pupils small. */
+    float ey = cy - 0.12f * ry, ex = face * 0.20f * rx, gap = 0.34f * rx * (0.75f + 0.25f * fabsf(face));
+    for (int k = 0; k < 2; k++) {
+        float x = cx + ex + (k ? gap : -gap) * (1 - 0.15f * fabsf(face));
+        if (asleep) {
+            fill_ellipse(c, x, ey + 0.05f * R, 0.20f * R, 0.05f * R, 0x241a22, 230);
+            continue;
+        }
+        float er = 0.25f * R * (1 + 0.12f * flat);
+        fill_ellipse(c, x, ey, er, er * 1.15f, 0xffffff, 255);
+        float pr = er * (0.62f - 0.22f * flat);
+        float px_ = x + face * er * 0.28f, py_ = ey + er * 0.10f;
+        fill_ellipse(c, px_, py_, pr, pr * 1.1f, 0x140c12, 255);
+        fill_ellipse(c, px_ - pr * 0.35f, py_ - pr * 0.4f, pr * 0.32f, pr * 0.32f, 0xffffff, 230);
+        /* drowsy: the lids come halfway down */
+        if (drowsy > 0.4f) {
+            float lid = er * 1.15f * (0.3f + 0.7f * (drowsy - 0.4f) / 0.6f);
+            float ly0 = ey - er * 1.15f;
+            for (int yy = (int)ly0; yy <= (int)(ly0 + lid); yy++) {
+                float w = er * ell_half((yy - ey) / (er * 1.15f));
+                if (w > 0) fill_ellipse(c, x, yy + 0.5f, w + 0.5f, 0.6f, fur, 255);
+            }
+        }
+    }
 }
 
-/* The fish's body is a ledger of its life: stage sets size (tank.c) and fin
- * elaboration, hunger drains saturation, and earned markings stay:
- *   elder -> a longer tail and a dorsal crest. All procedural, zero flash. */
-/* `mark` scales the accent stripes: 1 in the tank (every stage wears the
- * same 2 x 5 px marks), the preview's size so they read on a big fish */
-static void draw_fish_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float mark) {
-    float tail = sinf(clock * (8 + f->speed * 0.055f) + f->wander) *
-                 (0.32f + f->speed * 0.007f);
-    float stress = f->stress / 10.0f;
-    float pale = f->hunger > 7 ? (f->hunger - 7) / 3.0f * 0.35f : 0;   /* hungry = washed out */
-    /* pitch: the heading folded to face right (the climb or dive), then the
-     * yaw scales x: X = s(lx) * (lx cos p - ly sin p), Y = lx sin p + ly cos p.
-     * The BODY tilts less than the path: a fish rises and sinks on its fins
-     * with its back near level, so the travel angle is eased toward a cap of
-     * ~35 deg (~55 at a dash) - never nose-straight-up (Strato 09-29: "too
-     * much time in a vertical position") */
-    float pmax = 0.61f + 0.35f * fminf(fmaxf((f->speed - 35) * (1 / 40.0f), 0), 1);
-    float p = pmax * tanhf(0.8f * atan2f(sinf(f->heading), fabsf(cosf(f->heading))) / pmax);
-    float cp = cosf(p), sp = sinf(p);
-    float yh = yaw_ease(f->yaw), yt = yaw_ease(f->yaw_tail);
-    bool elder = f->stage == STAGE_ELDER, grown = f->stage >= STAGE_ADULT;
-    float tail_len = elder ? 1.22f : 1.0f;
-    uint32_t body = mix(mix(f->color, 0xf25b65, stress * 0.22f), 0x7a8a8e, pale);
-    uint32_t fin  = mix(mix(f->fin, 0xf25b65, stress * 0.18f), 0x5a6a6e, pale);
-#define TX(lx, ly) (f->x + yaw_at(yh, yt, lx) * ((lx) * cp - (ly) * sp) * f->size)
-#define TY(lx, ly) (f->y + ((lx) * sp + (ly) * cp) * f->size)
-
-    /* tail fin (triangle, flaps with tail phase) */
-    {
-        float lx[3] = {-11, -26 * tail_len, -26 * tail_len}, ly[3] = {0, -10 - tail * 8, 10 + tail * 8};
-        float xs[3], ys[3];
-        for (int i = 0; i < 3; i++) { xs[i] = TX(lx[i], ly[i]); ys[i] = TY(lx[i], ly[i]); }
-        fill_poly(c, xs, ys, 3, fin);
-    }
-    /* dorsal crest: adults a small fin, elders a taller one */
-    if (grown) {
-        float h = elder ? -17 : -13;
-        float lx[3] = {6, -2, -9}, ly[3] = {-8, h, -8};
-        float xs[3], ys[3];
-        for (int i = 0; i < 3; i++) { xs[i] = TX(lx[i], ly[i]); ys[i] = TY(lx[i], ly[i]); }
-        fill_poly(c, xs, ys, 3, fin);
-    }
-    /* body: sampled outline of the prototype's quadratic silhouette */
-    {
-        static const float blx[10] = { 16, 10, 2, -8, -15, -18, -15, -8, 2, 10 };
-        static const float bly[10] = { 0, -7, -10, -9, -6, 0, 6, 9, 10, 7 };
-        float xs[10], ys[10];
-        for (int i = 0; i < 10; i++) { xs[i] = TX(blx[i], bly[i]); ys[i] = TY(blx[i], bly[i]); }
-        fill_poly(c, xs, ys, 10, body);
-        /* its thickness: the cross-section at the deepest point, widening as
-         * the fish turns toward the glass (sin of the yaw angle) */
-        float sm = yaw_at(yh, yt, 2), rx = FISH_THICK * f->size * sqrtf(fmaxf(0, 1 - sm * sm));
-        if (rx >= 1) fill_ellipse(c, TX(2, 0), TY(2, 0), rx, 9.5f * f->size, body, 255);
-    }
-    /* accent stripes: on the flank, so they narrow with the turn and fade as
-     * the fish comes head-on (seen edge-on, a flank shows nothing).
-     * A FRY has none yet: its markings come in with its first growth spurt
-     * (the setup's colour page keeps the accent a "?" for that reason) */
-    if (f->stage >= STAGE_JUV) for (int i = -1; i <= 1; i++) {
-        float lx = -3 + i * 6, s = fabsf(yaw_at(yh, yt, lx));
-        if (s > 0.25f)
-            fill_ellipse(c, TX(lx, 0), TY(lx, 0), 2 * mark * s, 5 * mark,
-                         f->accent, (int)(150 * (s - 0.25f) / 0.75f));
-    }
-    /* eye — closed to a lid line when asleep (resting at night) */
-    if (asleep) {
-        fill_ellipse(c, TX(9, -3), TY(9, -3), 2.2f, 0.7f, 0x9fb4b8, 200);
-    } else {
-        fill_ellipse(c, TX(9, -3), TY(9, -3), 2.2f, 2.2f, 0xffffff, 255);
-        fill_ellipse(c, TX(9.7f, -3), TY(9.7f, -3), 1.1f, 1.1f, 0x031015, 255);
-    }
-#undef TX
-#undef TY
-}
-/* the tank's fish (the previews below draw a fish of their own) */
+/* the tank's Trubbles (the previews below draw one of their own) */
 static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f) {
-    draw_fish_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST, 1.0f);
+    draw_trubble_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST);
 }
 
 /* ---- the shrimp (2026-09-29): cherry shrimp from 18 x 8 pixel grids,
@@ -1767,6 +1777,20 @@ static inline uint32_t floor_rgb(int x, int y) {
     return tone < 2 ? 0x2e3b2c : tone < 5 ? 0x22301f : tone < 8 ? 0x1a2418 : 0x101a12;
 #endif
 }
+/* the pod's shelves (Trubbles, 2026-10-08): a slab of warm stone with a
+ * lit top lip and a shadowed underside, at tank_ledge's geometry */
+static void draw_ledges(ctx_t *c) {
+    for (int i = 0; i < N_LEDGES; i++) {
+        float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
+        float xs[4] = { x0, x1, x1 - 6, x0 + 6 }, ys[4] = { top, top, top + 12, top + 12 };
+        fill_poly(c, xs, ys, 4, 0x6b5a48);
+        float ls[4] = { x0, x1, x1, x0 }, ly[4] = { top, top, top + 3, top + 3 };
+        fill_poly(c, ls, ly, 4, 0x9c8668);
+        float ss[4] = { x0 + 6, x1 - 6, x1 - 8, x0 + 8 }, sy[4] = { top + 10, top + 10, top + 13, top + 13 };
+        fill_poly(c, ss, sy, 4, 0x3e3328);
+    }
+}
+
 static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     ctx_t c = ctx_full(fb, stride, dim);
     /* water gradient #0a3c46 → #08272f → #031015 */
@@ -1786,6 +1810,7 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     }
     /* (the dark oval under the left bed - the "reef rock" - is gone, 2026-10-02:
        it stood for nothing; the reef is the cluster the keeper buys) */
+    draw_ledges(&c);
     { int cx, z; bool placing; if (castle_state(t, &cx, &z, &placing)) draw_castle(&c, cx, 0, false); }   /* uncached: always drawn here */
     { int cx, z; bool placing; if (coral_state(t, &cx, &z, &placing) && z == DECOR_Z_BACK) draw_coral(&c, cx, tank_coral_rgb(t), tank_coral_growth(t), false); }
     { int cx, z; bool placing; if (cluster_state(t, &cx, &z, &placing) && z == DECOR_Z_BACK) draw_cluster(&c, cx, tank_cluster_scheme(t), tank_cluster_growth(t), false); }
@@ -1831,6 +1856,7 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
         }
     }
     ctx_t c = ctx_full(sc, TANK_W, dim);
+    draw_ledges(&c);
     if (g_scene_castle_x >= 0) draw_castle(&c, g_scene_castle_x, 0, true);   /* the castle, unless it is being dragged */
     if (g_scene_coral_x >= 0 && g_scene_coral_z == DECOR_Z_BACK) draw_coral(&c, g_scene_coral_x, g_scene_coral_rgb, (g_scene_coral_q + 0.5f) / CORAL_Q, true);   /* the coral BEHIND, likewise */
     if (g_scene_cl_x >= 0 && g_scene_cl_z == DECOR_Z_BACK) draw_cluster(&c, g_scene_cl_x, g_scene_cl_scheme, (g_scene_cl_q + 0.5f) / CL_Q, true);   /* the cluster BEHIND */
@@ -2675,7 +2701,8 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
     f.hunger = 4; f.stress = 0; f.goal.id = GOAL_EXPLORE;
     f.color = body; f.fin = fin; f.accent = accent;
     tank_fish_face(&f);                          /* side-on, facing right */
-    draw_fish_core(&c, &f, clock, false, size);
+    f.energy = 8; f.perch = PERCH_FLOOR;
+    draw_trubble_core(&c, &f, clock, false);
 }
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock) {
     ctx_t c = ctx_page(fb, stride);
@@ -2685,7 +2712,8 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
     f.hunger = 4; f.stress = 0; f.goal.id = GOAL_EXPLORE;
     f.color = who->color; f.fin = who->fin; f.accent = who->accent;
     tank_fish_face(&f);
-    draw_fish_core(&c, &f, clock, false, size);
+    f.energy = 8; f.perch = PERCH_FLOOR; f.preset = who->preset;
+    draw_trubble_core(&c, &f, clock, false);
 }
 void render_confirm_reset(uint16_t *fb, int stride, float frac) {
     ctx_t c = ctx_page(fb, stride);              /* ignores night dimming, like the card */

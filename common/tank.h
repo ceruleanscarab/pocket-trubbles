@@ -302,7 +302,16 @@ typedef struct {
      * parent_b's, bold / sociable the pair's average with a nudge. -1 = one
      * of the founding pair (or an older save). Saved per fish. */
     int8_t parent_a, parent_b;
+    /* gravity (Trubbles, 2026-10-08): a Trubble rolls along a surface, hops
+     * between surfaces and falls off edges - it never swims. Not saved: a
+     * boot drops everyone where they were. */
+    float  vx, vy;          /* px/s; speed is |vx| */
+    int8_t perch;           /* PERCH_*: what it stands on (1..N_LEDGES = ledge perch - 1) */
+    float  hop_cd;          /* s before it may hop again */
+    float  squash;          /* 1 on landing, decays: the renderer's bounce */
+    float  roll;            /* radians rolled, x / radius: the renderer's fur turn */
 } fish_t;
+enum { PERCH_AIR = -1, PERCH_FLOOR = 0, PERCH_FRIEND = 9 };
 
 /* a pellet: it sinks ~43 s from the surface to the floor, then RESTS there
  * FOOD_FLOOR_S before it dissolves (2026-09-29, for the shrimp school - every
@@ -762,6 +771,18 @@ void  tank_grow_algae(tank_t *t, int steps);
 
 /* helpers shared with advisor/render/progression */
 float tank_dist(float ax, float ay, float bx, float by);
+
+/* ---- gravity (Trubbles, 2026-10-08). The habitat pod's surfaces: the floor
+ * (the sand line, TANK_BOT - 16, from TANK_FX0 to TANK_FX1) and N_LEDGES
+ * one-way shelves in the top row of zones - a Trubble hops up through one
+ * from below and lands on it from above. */
+#define TRUB_R       15.0f      /* body radius at size 1 */
+#define GRAVITY      900.0f     /* px/s^2 */
+#define FLOOR_Y      (TANK_BOT - 16.0f)
+#define N_LEDGES     3
+void  tank_ledge(int i, float *x0, float *x1, float *top);   /* ledge i's span and top y */
+float tank_surface_top(int perch, float *x0, float *x1);     /* PERCH_FLOOR or 1..N_LEDGES */
+float tank_rest_y(float x, float y);                         /* the first surface top at or below (x, y) */
 int   tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out);
 int   tank_nearest_friend(const tank_t *t, int fish_idx, float *dist_out);
 float tank_randf(tank_t *t, float lo, float hi);

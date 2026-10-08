@@ -42,11 +42,6 @@ float tank_randf(tank_t *t, float lo, float hi) {
 static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : v > hi ? hi : v;
 }
-static float norm_ang(float a) {
-    while (a >  3.14159265f) a -= TAU;
-    while (a < -3.14159265f) a += TAU;
-    return a;
-}
 static float lerpf(float a, float b, float p) { return a + (b - a) * p; }
 
 float tank_dist(float ax, float ay, float bx, float by) {
@@ -123,6 +118,31 @@ static void rand_water(tank_t *t, float mx, float y0, float y1, float *x, float 
 #else
     *x = tank_randf(t, mx, TANK_W - mx); *y = tank_randf(t, y0, y1);
 #endif
+}
+
+/* ---- the pod's surfaces (Trubbles, 2026-10-08): the floor and three
+ * shelves, given in the rectangle's floor x (TANK_FLOOR_X) and as a fraction
+ * of TANK_BOT, so the bowl and the watch get the same layout. The middle one
+ * stands highest; the gaps between them are wide enough to drop through. */
+static const float LEDGE_DEF[N_LEDGES][3] = {     /* x0, x1 (of 448), top (of TANK_BOT) */
+    { 40, 150, 0.42f }, { 190, 258, 0.30f }, { 298, 408, 0.42f },
+};
+void tank_ledge(int i, float *x0, float *x1, float *top) {
+    *x0 = TANK_FLOOR_X(LEDGE_DEF[i][0]); *x1 = TANK_FLOOR_X(LEDGE_DEF[i][1]);
+    *top = LEDGE_DEF[i][2] * TANK_BOT;
+}
+float tank_surface_top(int perch, float *x0, float *x1) {
+    if (perch >= 1 && perch <= N_LEDGES) { float top; tank_ledge(perch - 1, x0, x1, &top); return top; }
+    *x0 = TANK_FX0; *x1 = TANK_FX1;
+    return FLOOR_Y;
+}
+float tank_rest_y(float x, float y) {
+    float best = FLOOR_Y;
+    for (int i = 0; i < N_LEDGES; i++) {
+        float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
+        if (x >= x0 && x <= x1 && top >= y && top < best) best = top;
+    }
+    return best;
 }
 
 int tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out) {
@@ -247,6 +267,7 @@ void tank_make_fish(tank_t *t, int slot, int preset, float sociable, float bold,
     f->sig = 0xffffffffu; f->ms_bits = 0; f->ms_seen = 0;
     f->color = p->color; f->fin = p->fin; f->accent = p->accent;
     f->parent_a = f->parent_b = -1;
+    f->vx = f->vy = 0; f->perch = PERCH_AIR; f->hop_cd = 0; f->squash = 0; f->roll = 0;
 }
 
 void tank_set_bubble_x(tank_t *t, float x) {
@@ -583,12 +604,10 @@ void tank_court_puff(tank_t *t, int n) {
  * rather than printed (reflex presentation; the advisor still owns both
  * goals). Down in the fronds, not mid-water: Strato (2026-09-04) - by the
  * reef it read as two friends at the bubbles. */
-static void court_steer(const tank_t *t, const fish_t *f, int idx, float *desired, float *speed) {
+static void court_steer(const tank_t *t, const fish_t *f, int idx, float *px, float *py, float *speed) {
     float ph = t->clock * 1.7f + (idx == t->court_b ? 3.14159f : 0);
     float cx, cy, rx; court_site(t, &cx, &cy, &rx);
-    float wx = cx + cosf(ph) * rx, wy = cy + sinf(ph) * 6;
-    float to = atan2f(wy - f->y, wx - f->x);
-    *desired = norm_ang(*desired + norm_ang(to - *desired) * 0.85f);
+    *px = cx + cosf(ph) * rx; *py = cy + sinf(ph) * 6;
     *speed = tank_dist(f->x, f->y, cx, cy) > 90 ? 46 : 30;
 }
 int tank_veg_frond(const tank_t *t, int b, int i, float *x) {
@@ -1701,6 +1720,23 @@ static int zone_of(float x, float y) {
     return row * 3 + col;
 }
 
+/* the surface a point is reached on (Trubbles, 2026-10-08): whichever
+ * surface's standing height is nearest the point's, a shelf's cost growing
+ * with how far the point lies off its end; *land_x is the spot on it a body
+ * of radius r can stand at */
+static int surface_for(float px, float py, float r, float *land_x) {
+    int tgt = PERCH_FLOOR; float best = 1e9f;
+    for (int s = PERCH_FLOOR; s <= N_LEDGES; s++) {
+        float x0, x1, top = tank_surface_top(s, &x0, &x1);
+        float off = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
+        float cost = fabsf(top - r - py) + 0.6f * off;
+        if (cost < best) { best = cost; tgt = s; }
+    }
+    float x0, x1; tank_surface_top(tgt, &x0, &x1);
+    *land_x = clampf(px, x0 + r, x1 - r);
+    return tgt;
+}
+
 /* ---- goal → target point + cruise speed (prototype targetForGoal, x0.55) ---- */
 typedef struct { float x, y, speed; bool valid; } target_t;
 
@@ -1790,7 +1826,7 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
          * model still owns the goal; this is the reflex layer resolving the
          * concrete target, as it does for every other goal. */
         if (glance) { if (!f->explore_set) tg.valid = false; else { tg.x = f->explore_x; tg.y = f->explore_y; } break; }
-        if (!f->explore_set || tank_dist(f->x, f->y, f->explore_x, f->explore_y) < 26) {
+        if (!f->explore_set || (fabsf(f->x - f->explore_x) < 26 && fabsf(f->y - f->explore_y) < 8)) {
             int cur = zone_of(f->x, f->y), best = -1, second = -1;
             for (int z = 0; z < 6; z++) {
                 if (z == cur) continue;
@@ -1804,11 +1840,16 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
 #if defined(TANK_ROUND) || defined(TANK_CORNER_R)
             tank_glass_clamp(&f->explore_x, &f->explore_y, 44);   /* a zone's corner is outside the bowl */
 #endif
+            /* (Trubbles) a spot it can stand on, or it would wait forever
+               under a point in mid-air */
+            float r = TRUB_R * f->size, x0, x1;
+            int s = surface_for(f->explore_x, f->explore_y, r, &f->explore_x);
+            f->explore_y = tank_surface_top(s, &x0, &x1) - r;
             f->explore_set = true;
         }
         /* the wander wobble bends the line so it reads as a swim, not a bee-line */
         tg.x = f->explore_x + sinf(f->wander) * 18;
-        tg.y = f->explore_y + cosf(f->wander * 0.7f) * 12;
+        tg.y = f->explore_y;
         break;
     }
     default: if (glance) tg.valid = false; break;
@@ -1824,31 +1865,10 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
     return tg;
 }
 
-static float wall_avoidance(const fish_t *f, bool *hit) {
-    const float m = 34;
-    float vx = 0, vy = 0;
-#ifdef TANK_ROUND                                          /* the bowl: away from the glass along its radius, and up off the floor */
-    float dx = f->x - TANK_RAD, dy = f->y - TANK_RAD, d = sqrtf(dx * dx + dy * dy), gap = TANK_RAD - d;
-    if (gap < m && d > 1) { float p = 1 - (gap < 0 ? 0 : gap) / m; vx -= dx / d * p; vy -= dy / d * p; }
-    if (f->y > TANK_BOT - m) vy -= 1 - (TANK_BOT - f->y) / m;
-#else
-    if (f->x < m)          vx += 1 - f->x / m;
-    if (f->x > TANK_W - m) vx -= 1 - (TANK_W - f->x) / m;
-    if (f->y < m + 6)      vy += 1 - (f->y - 6) / m;
-    if (f->y > TANK_H - m) vy -= 1 - (TANK_H - f->y) / m;
-#ifdef TANK_CORNER_R                                       /* the watch: in a corner the arc is nearer than either straight wall */
-    { float cx, cy, d = corner_in(f->x, f->y, &cx, &cy), gap = TANK_CORNER_R - d;
-      if (d > 1 && gap < m) { float p = 1 - (gap < 0 ? 0 : gap) / m; vx -= (f->x - cx) / d * p; vy -= (f->y - cy) / d * p; } }
-#endif
-#endif
-    *hit = (vx != 0 || vy != 0);
-    return *hit ? atan2f(vy, vx) : 0;
-}
-
 static void eat_nearby_food(tank_t *t, fish_t *f) {
     for (int i = 0; i < MAX_FOOD; i++) {
         if (!t->food[i].alive) continue;
-        if (tank_dist(f->x, f->y, t->food[i].x, t->food[i].y) < 12 * f->size + 4) {
+        if (tank_dist(f->x, f->y, t->food[i].x, t->food[i].y) < TRUB_R * f->size + 6) {
             t->food[i].alive = false;
             f->hunger = clampf(f->hunger - 4.3f, 0, 10);
             f->energy = clampf(f->energy + 1.0f, 0, 10);
@@ -1965,228 +1985,219 @@ static void update_fish(tank_t *t, int idx, float dt) {
     }
 
     target_t tg = target_for_goal(t, idx, f->goal.id, false);
-    /* fish prefer shallow climb/dive angles while cruising; full vertical
-     * agility stays available for urgent goals */
-    bool agile = f->goal.id == GOAL_FLEE_SHADOW || f->goal.id == GOAL_DART_PLAY;
-    float desired = atan2f((tg.y - f->y) * (agile ? 1.0f : 0.72f), tg.x - f->x);
-    /* final food approach: let the fish dip to the floor for the pellet
-     * instead of hovering above it on wall-avoidance (the "staring" bug) */
-    bool final_approach = f->goal.id == GOAL_SEEK_FOOD &&
-                          tank_dist(f->x, f->y, tg.x, tg.y) < 40;
-    bool hit; float push = wall_avoidance(f, &hit);
-    if (hit && !final_approach)
-        desired = norm_ang(desired + norm_ang(push - desired) * 0.62f);
+    /* every presentation below names a POINT (px, py) and a speed; the
+     * locomotion at the end turns the point into a roll, a hop or a drop */
+    float px = tg.x, py = tg.y;
 
-    /* hesitation: a low-confidence decision is shown, not hidden - the fish
-     * hovers and glances between its new target and the runner-up's for a
-     * moment before committing. Never for flight or high urgency. */
+    /* hesitation: a low-confidence decision is shown, not hidden - the
+     * Trubble dithers between its new target and the runner-up's for a
+     * moment before committing. Never for high urgency. */
     float hes_speed = -1;
     if (f->hesitate > 0) {
         f->hesitate -= dt;
         target_t alt = f->goal.runner_up < GOAL_COUNT
                      ? target_for_goal(t, idx, f->goal.runner_up, true) : (target_t){0, 0, 0, false};
         float phase = sinf(t->clock * 5.0f + f->wander);
-        if (alt.valid && phase < 0) desired = atan2f((alt.y - f->y) * 0.72f, alt.x - f->x);
+        if (alt.valid && phase < 0) { px = alt.x; py = alt.y; }
         hes_speed = 5;
     }
 
-    /* touch: spooked fish bolt from the tap site; trusting fish drift to a
+    /* touch: spooked Trubbles bolt from the tap site; trusting ones come to a
      * resting finger (reflex-layer, independent of the advisor's goal) */
     float touch_speed = -1;
     if (t->startled && f->goal.id != GOAL_FLEE_SHADOW) {
         float d = tank_dist(f->x, f->y, t->startle_x, t->startle_y);
         if (d < STARTLE_RADIUS * 1.6f) {
-            float away = atan2f(f->y - t->startle_y, f->x - t->startle_x);
-            desired = norm_ang(desired + norm_ang(away - desired) * 0.85f);
+            float dx = f->x - t->startle_x;
+            px = f->x + (dx < 0 ? -140 : 140); py = f->y;
             touch_speed = lerpf(55, 90, f->bold);
         }
     } else if (idx == t->stage_fish) {
-        /* on stage (setup): a lazy figure-of-eight round the page's clear
-         * spot, turning at each end so both flanks show; a fish far from it
-         * cruises over first. Above every other presentation: the keeper is
-         * looking at THIS fish. */
+        /* on stage (setup): back and forth across the page's clear spot,
+         * turning at each end so both sides show. Above every other
+         * presentation: the keeper is looking at THIS one. */
         float ph = t->clock * 1.1f + f->wander;
-        float wx = t->stage_x + cosf(ph) * 24, wy = t->stage_y + sinf(ph * 2) * 6;
-        float to = atan2f(wy - f->y, wx - f->x);
-        desired = norm_ang(desired + norm_ang(to - desired) * 0.85f);
+        px = t->stage_x + cosf(ph) * 24; py = t->stage_y;
         touch_speed = tank_dist(f->x, f->y, t->stage_x, t->stage_y) > 80 ? 44 : 20;
     } else if (t->spawning && (idx == t->court_a || idx == t->court_b) &&
                f->goal.id != GOAL_FLEE_SHADOW && !(t->ravenous && f->hunger > 6.5f)) {
-        /* the spawning (2026-09-24): the courtship that ends in a fry. It
-         * outranks a resting finger and the greeting - this is the moment the
-         * keeper is here for - and hunger short of the famine doesn't veto
-         * it; a starving parent still begs first (feed it, it comes back). */
-        court_steer(t, f, idx, &desired, &touch_speed);
+        /* the spawning (2026-09-24): outranks a resting finger and the
+         * greeting; a starving parent still begs first */
+        court_steer(t, f, idx, &px, &py, &touch_speed);
     } else if (t->hold_active && t->hold_time >= HOLD_ATTRACT_S &&
                f->goal.id != GOAL_FLEE_SHADOW && f->trust >= 4.0f &&
                f->hunger < HOLD_HUNGER_VETO) {
-        /* only a settled hold (~3 s of contact) draws fish in - quick taps and
-         * card-taps never twitch the school - and a strongly hungry fish has
-         * better things to do than visit a finger */
+        /* only a settled hold (~3 s of contact) draws them in, and a strongly
+         * hungry one has better things to do than visit a finger */
         float d = tank_dist(f->x, f->y, t->hold_x, t->hold_y);
         if (d < HOLD_RADIUS) {
             float w = (f->trust - 4.0f) / 6.0f;          /* 0..1 with trust */
-            float to = atan2f(t->hold_y - f->y, t->hold_x - f->x);
-            if (d > 28) desired = norm_ang(desired + norm_ang(to - desired) * (0.5f + 0.45f * w));
-            /* far fish cross the tank at a cruise, not a drift; close in
-             * they slow to arrive and hover */
+            px = t->hold_x; py = t->hold_y;
             float far = d > 120 ? 1.0f : d / 120.0f;
             touch_speed = d > 28 ? lerpf(14, 30, w) + far * lerpf(10, 20, w) : 4;
         }
     } else if (t->greet_timer > 0 && f->trust >= 7.0f && f->goal.id != GOAL_FLEE_SHADOW &&
                f->goal.id != GOAL_SEEK_FOOD) {
-        /* light-on greeting: trusting fish come up front to see who's there */
-        float gx = TANK_W * 0.5f + (idx - t->n_fish * 0.5f) * 34, gy = 70;
-        float d = tank_dist(f->x, f->y, gx, gy);
-        if (d > 24) {
-            float to = atan2f(gy - f->y, gx - f->x);
-            desired = norm_ang(desired + norm_ang(to - desired) * 0.7f);
-            touch_speed = 26;
-        } else touch_speed = 5;
+        /* light-on greeting: trusting ones come up front to see who's there */
+        px = TANK_W * 0.5f + (idx - t->n_fish * 0.5f) * 34; py = 70;
+        touch_speed = tank_dist(f->x, f->y, px, py) > 24 ? 26 : 5;
     } else if (t->ravenous && f->goal.id != GOAL_FLEE_SHADOW && f->hunger > 6.5f) {
-        /* starving tank: reflex presentation of the famine, like the greet/
-         * hold overrides above - the advisor still owns the goal. Two phases:
-         * empty water = beg where meals come from (quick darts back and forth
-         * under the feed spot, unmistakably "feed me"); live pellets = the
-         * DASH - a real starving fish bolts the moment food hits the water,
-         * it doesn't wait to think it over (the advisor's seek_food arrives
-         * seconds later and takes back a fish that is already eating). A fish
-         * that has eaten (hunger <= 6.5) drops out of the frenzy at once. */
+        /* a starving pod: the advisor still owns the goal. Empty pod = beg
+         * under the feed spot, rolling back and forth; live pellets = the
+         * dash - a starving Trubble goes the moment food drops. */
         float fd; int fi = tank_nearest_food(t, f, &fd);
         if (fi >= 0) {
-            float to = atan2f(t->food[fi].y - f->y, t->food[fi].x - f->x);
-            desired = norm_ang(desired + norm_ang(to - desired) * 0.92f);
+            px = t->food[fi].x; py = t->food[fi].y;
             touch_speed = fd > 14 ? lerpf(85, 115, clampf(f->hunger / 10.0f, 0, 1)) : 30;
         } else {
             float spot = t->feed_spot_x >= 0 ? t->feed_spot_x : TANK_W * 0.5f;
-            float wx = spot + sinf(t->clock * (1.6f + f->bold * 0.9f) + idx * 2.1f) * (34 + idx * 6);
-            float wy = 30 + idx * 4 + sinf(t->clock * 3.1f + f->wander) * 6;
-            float to = atan2f(wy - f->y, wx - f->x);
-            desired = norm_ang(desired + norm_ang(to - desired) * 0.85f);
-            touch_speed = tank_dist(f->x, f->y, wx, wy) > 18
-                        ? lerpf(40, 68, clampf(f->hunger / 10.0f, 0, 1)) : 22;
+            px = spot + sinf(t->clock * (1.6f + f->bold * 0.9f) + idx * 2.1f) * (34 + idx * 6);
+            py = 30;
+            touch_speed = fabsf(f->x - px) > 18 ? lerpf(40, 68, clampf(f->hunger / 10.0f, 0, 1)) : 22;
         }
     } else if (t->court_active > 0 && !t->ravenous &&
                (idx == t->court_a || idx == t->court_b) &&
                f->goal.id != GOAL_FLEE_SHADOW && f->hunger < HOLD_HUNGER_VETO) {
-        /* the tell: an episode of the courtship circle, the arrival close */
-        court_steer(t, f, idx, &desired, &touch_speed);
+        /* the tell: an episode of the courtship circle */
+        court_steer(t, f, idx, &px, &py, &touch_speed);
     }
 
-    /* separation - personal space. Fish are ~40 px long; the old 16 px
-     * radius let four content fish stack on one landmark like a pile of
-     * cards (2026-09-01). Now a body length, weighted by how close they are;
-     * a fleeing fish keeps its line. */
-    if (f->goal.id != GOAL_FLEE_SHADOW)
-        for (int i = 0; i < t->n_fish; i++) {
-            if (i == idx) continue;
-            float d = tank_dist(f->x, f->y, t->fish[i].x, t->fish[i].y), r = 36 * f->size;
-            if (d < r) {
-                float away = atan2f(f->y - t->fish[i].y, f->x - t->fish[i].x);
-                desired = norm_ang(desired + norm_ang(away - desired) * (0.35f + 0.5f * (1 - d / r)));
-            }
-        }
-
-    /* urgency scales cruise speed a touch (0..9 → 0.8..1.25) */
+    /* urgency scales cruise speed a touch (0..9 -> 0.8..1.25) */
     float ugain = 0.8f + f->goal.urgency * 0.05f;
-    /* a U-turn is a YAW (2026-09-29): a fish whose way lies behind it no longer
-     * loops over through vertical and rolls flat - it turns round where it is,
-     * toward the glass. (A YouTube viewer on the old roll: "that looks bad".)
-     * It swims on one SIDE (facing) and changes side only by a committed turn:
-     * the way must stay behind it for a moment - ~2 s hovering (3 at its
-     * spot), a third of a second cruising, at once when it matters (a dash,
-     * a startle, darting play) - and a turn is followed by ~1.3 s of settling. Until it commits
-     * it glances back (a part turn) and eases off, steering on its own side:
-     * the way mirrored across vertical, its climb or dive kept. Strato, the
-     * same night, on the first cut (a turn the moment the way fell behind):
-     * "too much time in a vertical position or flip flopping back and forth" -
-     * 21 flips a fish-minute, 34 at the bubble column, where the lane swings
-     * side to side every ~5 s. */
-    const float BEHIND_BAND  = 0.15f;    /* |cos| past vertical before the way is "behind" */
-    const float TURN_SETTLE  = 1.3f;     /* s after a turn before the next can begin */
-    if (!f->facing) f->facing = cosf(f->heading) < 0 ? -1 : 1;
-    bool urgent = agile || (t->ravenous && f->hunger > 6.5f) || (t->startled && touch_speed >= 55);
-    bool behind = cosf(desired) * f->facing < -BEHIND_BAND;
-    if (behind) f->behind += dt;
-    else f->behind = f->behind > 0 ? 0 : fminf(0, f->behind + dt);
-    /* hanging about its spot (the goal's point within ~30 px) a fish is in
-     * no hurry: the lane swinging past it is a glance, not a turn */
-    bool at_spot = tg.valid && tank_dist(f->x, f->y, tg.x, tg.y) < 30;
-    float commit = urgent ? 0 : lerpf(2.0f, 0.3f, clampf((f->speed - 10) * (1 / 25.0f), 0, 1)) + (at_spot ? 1.2f : 0);
-    if (behind && f->behind >= commit) {
-        f->facing = (int8_t)-f->facing;
-        f->heading = norm_ang(3.14159f - f->heading);   /* the climb or dive kept */
-        f->behind = urgent ? 0 : -TURN_SETTLE;
-    }
-    bool glancing = f->behind > 0;       /* the way is behind, the turn not yet committed */
-    if (cosf(desired) * f->facing < 0)   /* on its own side until it turns */
-        desired = atan2f(sinf(desired), f->facing * fabsf(cosf(desired)));
-    float turn = clampf(norm_ang(desired - f->heading), -f->turn_rate * dt, f->turn_rate * dt);
-    f->heading = norm_ang(f->heading + turn);
-    /* the yaw follows the side: a full turn in ~0.5 s at mira's turn rate
-     * (bolt 0.4, nori 0.7), quicker with urgency; a glance is 40% of one.
-     * The tail follows the head a beat behind */
-    float hc = cosf(f->heading);
-    float face = f->facing * (glancing ? 0.6f : 1.0f);
-    float yrate = f->turn_rate * 1.2f * (1 + f->goal.urgency * 0.06f) * dt;
-    f->yaw += clampf(face - f->yaw, -yrate, yrate);
-    f->yaw_tail += (f->yaw - f->yaw_tail) * clampf(dt * 10, 0, 1);
     float want = touch_speed >= 0 ? touch_speed : hes_speed >= 0 ? hes_speed : tg.speed * ugain;
-    f->target_speed = want * (f->energy < 1.2f ? 0.45f : 1) * (glancing ? 0.6f : 1);
-    /* swimming through a canopy is slow going (a fleeing fish crashes through) */
+    if (f->energy < 1.2f) want *= 0.45f;
+    /* rolling through a canopy is slow going (a bolting Trubble crashes through) */
     if (f->goal.id != GOAL_FLEE_SHADOW)
         for (int b = 0; b < tank_veg_beds(t); b++)
-            if (veg_inside(t, b, f->x, f->y)) { f->target_speed *= VEG_SLOW; break; }
-    f->speed = lerpf(f->speed, f->target_speed, clampf(dt * 2.6f, 0, 1));
-    /* the swim follows the facing: side-on it is the heading's own, and as
-     * the fish turns head-on its level travel crosses zero and it brakes to
-     * 40%. Only a LEVEL turn: steep, the heading steers as it always did (a
-     * diver's small corrections at the pellet don't wait on a flip) */
-    float ahc = fabsf(hc), w = clampf((ahc - 0.2f) * (1 / 0.4f), 0, 1);
-    float brake = 1 - 0.6f * (1 - fabsf(f->yaw)) * ahc * w;
-    f->x += (hc + (f->yaw * ahc - hc) * w) * f->speed * brake * dt;
-    f->y += sinf(f->heading) * f->speed * brake * dt + sinf(t->clock * 1.4f + f->wander) * dt * 1.7f;
+            if (veg_inside(t, b, f->x, f->y)) { want *= VEG_SLOW; break; }
+    f->target_speed = want;
 
-    /* hard bounds. The side glass mirrors a heading only while it points
-     * INTO the glass: the facing lags the mirror, and a second bounce on the
-     * next frame would send the fish back into the glass */
-    float m = 15 * f->size;
-#ifdef TANK_ROUND                                          /* the bowl's glass: back onto the circle m inside it, the heading mirrored
-                                                              in the glass while it points out, the body turned to swim back in */
-    { float dx = f->x - TANK_RAD, dy = f->y - TANK_RAD, d = sqrtf(dx * dx + dy * dy), lim = TANK_RAD - m;
-      if (d > lim && d > 1) {
-          float nx = dx / d, ny = dy / d;
-          f->x = TANK_RAD + nx * lim; f->y = TANK_RAD + ny * lim;
-          float hx = cosf(f->heading), hy = sinf(f->heading), out = hx * nx + hy * ny;
-          if (out > 0) {
-              hx -= 2 * out * nx; hy -= 2 * out * ny; f->heading = atan2f(hy, hx);
-              if (nx < -0.5f && f->facing < 0) { f->facing = 1; f->behind = -TURN_SETTLE; }
-              if (nx > 0.5f && f->facing > 0)  { f->facing = -1; f->behind = -TURN_SETTLE; }
-          }
-      }
-      if (f->y > TANK_BOT - m) { f->y = TANK_BOT - m; f->heading = -f->heading; } }
-#else
-    if (f->x < m)          { f->x = m;          if (cosf(f->heading) < 0) f->heading = norm_ang(3.14159f - f->heading);
-                                                if (f->facing < 0) { f->facing = 1; f->behind = -TURN_SETTLE; } }
-    if (f->x > TANK_W - m) { f->x = TANK_W - m; if (cosf(f->heading) > 0) f->heading = norm_ang(3.14159f - f->heading);
-                                                if (f->facing > 0) { f->facing = -1; f->behind = -TURN_SETTLE; } }
-    if (f->y < m)          { f->y = m;          f->heading = -f->heading; }
-    if (f->y > TANK_H - m) { f->y = TANK_H - m; f->heading = -f->heading; }
-#ifdef TANK_CORNER_R                                       /* the watch's corners: back onto the arc m inside it, the heading mirrored
-                                                              in the glass while it points out (the bowl's rule, a corner at a time) */
-    { float cx, cy, d = corner_in(f->x, f->y, &cx, &cy), lim = TANK_CORNER_R - m;
-      if (d > lim && d > 1) {
-          float nx = (f->x - cx) / d, ny = (f->y - cy) / d;
-          f->x = cx + nx * lim; f->y = cy + ny * lim;
-          float hx = cosf(f->heading), hy = sinf(f->heading), out = hx * nx + hy * ny;
-          if (out > 0) {
-              hx -= 2 * out * nx; hy -= 2 * out * ny; f->heading = atan2f(hy, hx);
-              if (nx < -0.5f && f->facing < 0) { f->facing = 1; f->behind = -TURN_SETTLE; }
-              if (nx > 0.5f && f->facing > 0)  { f->facing = -1; f->behind = -TURN_SETTLE; }
-          }
-      } }
-#endif
-#endif
+    /* ---- locomotion (Trubbles, 2026-10-08): the point becomes a surface
+     * and a spot on it - whichever surface's standing height is nearest the
+     * point's, a shelf's cost growing with how far the point lies off its
+     * end - and the Trubble rolls there, hops there, or rolls off an edge
+     * and lets gravity take it down. */
+    float r = TRUB_R * f->size, land_x;
+    int tgt = surface_for(px, py, r, &land_x);
+    float tx0, tx1, ttop = tank_surface_top(tgt, &tx0, &tx1);
+
+    /* support: a shelf holds a Trubble while its centre is over it; the
+     * floor always does; a friend's back holds it for a frame at a time
+     * (the bumps in tank_tick re-seat it) */
+    bool on_friend = f->perch == PERCH_FRIEND;
+    if (on_friend) f->perch = PERCH_AIR;
+    if (f->perch >= 1) {
+        float x0, x1; tank_surface_top(f->perch, &x0, &x1);
+        if (f->x < x0 || f->x > x1) f->perch = PERCH_AIR;     /* rolled off the end */
+    }
+    bool grounded = f->perch != PERCH_AIR || on_friend;
+    if (f->hop_cd > 0) f->hop_cd -= dt;
+    if (f->squash > 0) f->squash = fmaxf(0, f->squash - dt * 4);
+
+    if (grounded) {
+        float base = f->y + r;                               /* the height it stands at */
+        float cx0 = TANK_FX0, cx1 = TANK_FX1;
+        if (f->perch >= 0) tank_surface_top(f->perch, &cx0, &cx1);
+        bool same = f->perch == tgt;
+        bool up = !same && ttop < base + 10;                 /* higher, or a shelf at its own height */
+        float roll_to = land_x;
+        bool hop = false;
+        if (up) {
+            /* roll toward the spot but stay on this surface; hop once in
+             * reach, or from the end of this surface */
+            float lim = clampf(land_x, cx0 + r, cx1 - r);
+            roll_to = lim;
+            hop = f->hop_cd <= 0 && (fabsf(land_x - f->x) < 80 || fabsf(lim - f->x) < 6);
+        } else if (!same && f->perch >= 1 && land_x > cx0 - r && land_x < cx1 + r) {
+            /* down to something under this shelf: off the nearer end first */
+            roll_to = (f->x - cx0 < cx1 - f->x) ? cx0 - r : cx1 + r;
+        }
+        /* a friend in the way: on a floor or a shelf two bodies cannot roll
+           past each other, so one going beyond a neighbour hops over it */
+        int over = -1;
+        if (!hop && f->hop_cd <= 0 && fabsf(roll_to - f->x) > 4) {
+            float dir = roll_to > f->x ? 1.0f : -1.0f;
+            for (int j = 0; j < t->n_fish; j++) {
+                const fish_t *o = &t->fish[j];
+                if (j == idx || o->perch == PERCH_AIR) continue;
+                float ahead = (o->x - f->x) * dir, rs = TRUB_R * (f->size + o->size);
+                if (ahead > 0 && ahead < rs + 4 && fabsf(o->y - f->y) < rs * 0.6f &&
+                    fabsf(roll_to - f->x) > ahead + 4) { over = j; break; }
+            }
+        }
+        if (over >= 0) {
+            const fish_t *o = &t->fish[over];
+            float v0 = sqrtf(2 * GRAVITY * (2 * TRUB_R * o->size + 10));
+            float t_air = 2 * v0 / GRAVITY, clear = fabsf(o->x - f->x) + TRUB_R * (f->size + o->size) + 6;
+            f->vy = -v0;
+            f->vx = clampf(copysignf(clear / t_air, o->x - f->x), -240, 240);
+            f->perch = PERCH_AIR; f->hop_cd = 0.4f;
+            f->energy = clampf(f->energy - 0.05f, 0, 10);
+        } else if (hop) {
+            float h = base - ttop, rise = fmaxf(h, 0) + 26;
+            float v0 = sqrtf(2 * GRAVITY * rise);
+            float t_air = v0 / GRAVITY + sqrtf(2 * (rise - h) / GRAVITY);
+            f->vy = -v0;
+            f->vx = clampf((land_x - f->x) / t_air, -240, 240);
+            f->perch = PERCH_AIR; f->hop_cd = 0.4f;
+            f->energy = clampf(f->energy - 0.05f, 0, 10);
+        } else {
+            /* roll: ease toward the spot, braking on the way in */
+            float dx = roll_to - f->x;
+            float vt = copysignf(fminf(want, fabsf(dx) * 2.5f), dx);
+            if (fabsf(dx) < 2) vt = 0;
+            f->vx += clampf(vt - f->vx, -260 * dt, 260 * dt);
+            if (on_friend) f->vy = fminf(f->vy, 0);
+        }
+    }
+    if (f->perch == PERCH_AIR) f->vy += GRAVITY * dt;
+    float prev_bot = f->y + r;
+    f->x += f->vx * dt;
+    f->y += f->vy * dt;
+    f->roll += f->vx * dt / r;
+    if (f->perch == PERCH_AIR && f->vy > 0) {
+        /* landing: the first surface the feet crossed this frame */
+        float bot = f->y + r;
+        for (int s = PERCH_FLOOR; s <= N_LEDGES; s++) {
+            float x0, x1, top = tank_surface_top(s, &x0, &x1);
+            bool solid = s == PERCH_FLOOR;                   /* the floor is never fallen through */
+            if (!solid && (f->x < x0 || f->x > x1)) continue;
+            if ((solid || prev_bot <= top + 0.5f) && bot >= top) {
+                f->y = top - r; f->perch = (int8_t)s;
+                f->squash = clampf(f->vy / 500.0f, 0.2f, 1.0f);
+                f->vy = 0; f->hop_cd = fmaxf(f->hop_cd, 0.25f);
+                if (s != tgt || fabsf(land_x - f->x) > 6) f->vx *= 0.5f;   /* a bump, not a skid */
+                break;
+            }
+        }
+    } else if (f->perch != PERCH_AIR) {
+        float x0, x1;
+        f->y = tank_surface_top(f->perch, &x0, &x1) - r;
+        /* staying on this shelf: held on it, whatever a neighbour's roll
+           pushes into it (only a decision to go down takes it over the end) */
+        if (f->perch >= 1 && f->perch == tgt) {
+            if (f->x < x0 + 1) { f->x = x0 + 1; if (f->vx < 0) f->vx = 0; }
+            if (f->x > x1 - 1) { f->x = x1 - 1; if (f->vx > 0) f->vx = 0; }
+        }
+    }
+
+    /* facing follows the roll; the yaw turns toward it as the fish's did */
+    if (f->vx > 8) f->facing = 1; else if (f->vx < -8) f->facing = -1;
+    if (!f->facing) f->facing = 1;
+    f->behind = 0;
+    float yrate = f->turn_rate * 1.2f * (1 + f->goal.urgency * 0.06f) * dt;
+    f->yaw += clampf(f->facing - f->yaw, -yrate, yrate);
+    f->yaw_tail += (f->yaw - f->yaw_tail) * clampf(dt * 10, 0, 1);
+    f->heading = f->facing > 0 ? 0 : 3.14159f;
+    f->speed = fabsf(f->vx);
+
+    /* the glass: side walls turn a roll back; the top stops a hop */
+    float lo = TANK_FX0 + r, hi = TANK_FX1 - r;
+    if (f->perch == PERCH_AIR) { lo = tank_glass_x0(f->y) + r; hi = tank_glass_x1(f->y) - r; }
+    if (f->x < lo) { f->x = lo; if (f->vx < 0) f->vx = -f->vx * 0.4f; }
+    if (f->x > hi) { f->x = hi; if (f->vx > 0) f->vx = -f->vx * 0.4f; }
+    float ceil = tank_glass_top(f->x) + r;
+    if (f->y < ceil) { f->y = ceil; if (f->vy < 0) f->vy = 0; }
 
     eat_nearby_food(t, f);
 }
@@ -2218,6 +2229,13 @@ static uint32_t state_signature(const tank_t *t, int idx) {
          | (uint32_t)band3(f->bored) << 13;      /* a fish going stale is asked again (2026-09-14) */
 }
 
+/* would moving f by dx put it past the end of the shelf it stands on? */
+static bool ledge_pinned(const fish_t *f, float dx) {
+    if (f->perch < 1 || f->perch > N_LEDGES) return false;
+    float x0, x1; tank_surface_top(f->perch, &x0, &x1);
+    return f->x + dx < x0 + 2 || f->x + dx > x1 - 2;
+}
+
 void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     t->clock += dt;
     /* the light: on while the device is handled, off LIGHT_IDLE_S after the
@@ -2241,10 +2259,14 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
         if (!p->alive) continue;
         live_food++;
         p->age += dt;
-        if (p->y < FOOD_FLOOR_Y) {
-            p->y += 8 * dt;
-            p->x += sinf(p->age * 1.5f) * dt * 2;
-        } else p->floor_s += dt;                        /* resting on the floor (FOOD_FLOOR_S) */
+        /* a pellet drops (gravity, Trubbles 2026-10-08) and rests on the
+         * first surface it meets - a shelf or the floor */
+        float rest = p->y;
+        if (p->floor_s <= 0) { rest = tank_rest_y(p->x, p->y); rest = rest >= FLOOR_Y ? FOOD_FLOOR_Y : rest - 2; }
+        if (p->y < rest) {
+            p->y = fminf(p->y + fminf(60 + p->age * 500, 260) * dt, rest);
+            if (p->y >= rest) p->floor_s = 1e-3f;
+        } else p->floor_s += dt;                        /* resting (FOOD_FLOOR_S) */
         if (p->floor_s > 0 ? p->floor_s > FOOD_FLOOR_S : p->age > FOOD_LIFE_S) p->alive = false;
     }
     /* the tank's own trickle keeps fish alive when nobody is home (never
@@ -2257,13 +2279,24 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
      * but once the keeper HAS fed this episode it helps again: a quick fish
      * can gobble every pellet, and the slow one shouldn't beg out the whole
      * give-up valve for it. */
-    float hungriest = 0;
+    float hungriest = 0; int hi = -1;
     for (int i = 0; i < t->n_fish; i++)
-        if (t->fish[i].hunger > hungriest) hungriest = t->fish[i].hunger;
+        if (t->fish[i].hunger > hungriest) { hungriest = t->fish[i].hunger; hi = i; }
     bool hold = (t->ravenous && !t->ravenous_fed) || t->trickle_off || t->autofeed_off;   /* (AUTO FEED off: the keeper's alone, 0.3.2) */
     if (!hold && live_food < 2 && hungriest >= TRICKLE_HUNGER &&
-        tank_randf(t, 0, 1) < TRICKLE_RATE * dt)
-        tank_scatter_food(t, 1);
+        tank_randf(t, 0, 1) < TRICKLE_RATE * dt) {
+        /* (Trubbles) it drops near whoever asked for it: on foot a neighbour
+           nearer a random pellet beat the hungry one to it, every time */
+        for (int i = 0; i < MAX_FOOD; i++) {
+            food_t *p = &t->food[i];
+            if (p->alive) continue;
+            p->alive = true; p->from_player = false;
+            p->x = clampf(t->fish[hi].x + tank_randf(t, -40, 40), TANK_FX0 + 25, TANK_FX1 - 25);
+            p->y = tank_glass_top(p->x) + tank_randf(t, 6, 20);
+            p->age = 0; p->floor_s = 0; p->nibbled = 0;
+            break;
+        }
+    }
 
     /* upkeep: the garden gets away from an idle keeper, slowly */
     veg_grow(t, dt / VEG_GROW_AWAKE_S);
@@ -2352,6 +2385,35 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     }
 
     for (int i = 0; i < t->n_fish; i++) update_fish(t, i, dt);
+
+    /* bumps (Trubbles, 2026-10-08): two bodies never overlap. Side by side
+     * they push apart and trade a little of their roll; one coming down on
+     * another's back is held there - it rests, or slides off the curve */
+    for (int i = 0; i < t->n_fish; i++)
+        for (int j = i + 1; j < t->n_fish; j++) {
+            fish_t *a = &t->fish[i], *b = &t->fish[j];
+            float dx = b->x - a->x, dy = b->y - a->y, d = sqrtf(dx * dx + dy * dy);
+            float rr = TRUB_R * (a->size + b->size);
+            if (d >= rr) continue;
+            if (d < 0.01f) { dx = 1; dy = 0; d = 1; }
+            float nx = dx / d, ny = dy / d, over = rr - d;
+            if (ny < -0.6f || ny > 0.6f) {                   /* one on top of the other */
+                fish_t *top = ny < 0 ? b : a;
+                float s = ny < 0 ? -1 : 1;                   /* +1: b is the lower, push a up */
+                top->x -= nx * over * s; top->y -= ny * over * s;
+                if (top->vy > 0) top->vy = 0;
+                top->perch = PERCH_FRIEND;
+            } else {
+                /* a body on a shelf is never shoved off its end: the
+                 * other one takes the whole push instead */
+                float sa = 0.5f, sb = 0.5f;
+                if (ledge_pinned(a, -nx * over * 0.5f)) { sa = 0; sb = 1; }
+                else if (ledge_pinned(b, nx * over * 0.5f)) { sa = 1; sb = 0; }
+                a->x -= nx * over * sa; b->x += nx * over * sb;
+                float rel = (b->vx - a->vx) * nx;
+                if (rel < 0) { a->vx += rel * 0.8f * nx; b->vx -= rel * 0.8f * nx; }
+            }
+        }
 
     /* consume the hold AFTER the fish have seen it (the platform re-asserts
      * every frame the finger stays down). Clearing it at the top of the tick
