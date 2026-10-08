@@ -161,6 +161,7 @@ static float fast_sin(float x) {
     return lut[(int)(x * (256.0f / TAU)) & 255];
 }
 
+static void rect_fill(ctx_t *c, int x, int y, int w, int h, uint32_t rgb);   /* below (the air vent's grille uses it) */
 /* filled convex polygon, points in world space */
 static void fill_poly(ctx_t *c, const float *xs, const float *ys, int n, uint32_t rgb) {
     float miny = 1e9f, maxy = -1e9f;
@@ -508,13 +509,16 @@ static inline void span_final(ctx_t *c, int x0, int x1, int y, const src_t *s, i
     }
 }
 
-/* water gradient colour of row y (shared by the scene bake and the frond
- * pre-tint below) */
-static inline uint32_t water_rgb(int y) {
-    float p = (float)y / TANK_BOT;                 /* the gradient runs surface to floor; under a bowl's sand line it holds */
+/* the pod's back wall, colour of row y (Trubbles, 2026-10-08; it was the
+ * water's gradient). A function of the row ONLY - the scene bake and every
+ * decor pre-tint (the fronds, the castle, the coral) blend against it, so
+ * the wall's detail (seams, rivets, the viewport: draw_wall_detail) is laid
+ * on top in the bake and never enters this */
+static inline uint32_t wall_rgb(int y) {
+    float p = (float)y / TANK_BOT;                 /* top of the pod to the deck; under a bowl's deck line it holds */
     if (p > 1) p = 1;
-    return p < 0.45f ? mix(0x0a3c46, 0x08272f, p / 0.45f)
-                     : mix(0x08272f, 0x031015, (p - 0.45f) / 0.55f);
+    return p < 0.45f ? mix(0x1f2a35, 0x161e28, p / 0.45f)
+                     : mix(0x161e28, 0x0a0f16, (p - 0.45f) / 0.55f);
 }
 
 /* Fronds are drawn OPAQUE from a per-row pre-tinted palette (2026-09-04):
@@ -531,7 +535,7 @@ static void veg_tint_fill(float dim) {
     static const uint32_t frond[4] = { 0x3f8b55, 0x2e7d4f, 0x8dbb48, 0x6c9d38 };
     if (g_veg_row_dim == dim) return;
     for (int y = 0; y < TANK_H; y++) {
-        uint32_t w = water_rgb(y);
+        uint32_t w = wall_rgb(y);
         for (int k = 0; k < 4; k++)
             g_veg_row[k][y] = rgb565(mix(w, frond[k], VEG_ALPHA / 255.0f), dim);
     }
@@ -671,7 +675,7 @@ static void castle_tint_fill(float dim) {
     if (g_castle_dim == dim) return;
     for (int r = 0; r < CASTLE_ROWS + 12; r++) {
         int y = CASTLE_FY - CASTLE_ROWS + r;
-        uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
+        uint32_t w = wall_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int k = 0; k < CT_N; k++) {
             g_castle_row[0][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : 0.70f), dim);
             g_castle_row[1][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : 0.82f), dim);
@@ -1062,7 +1066,7 @@ static void coral_tint_fill(uint32_t rgb, float dim) {
     tone[CO_TIP]   = mix(rgb, 0xffe8a0, 0.58f);
     for (int r = 0; r < CORAL_H; r++) {
         int y = CORAL_FY - CORAL_H + r;
-        uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
+        uint32_t w = wall_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int k = 1; k < CO_N; k++) ds()->co_row[k][r] = rgb565(mix(w, tone[k], k == CO_TIP ? 0.94f : 0.90f), dim);   /* a light haze: the art's colour stays saturated */
     }
     g_coral_rgb = rgb; g_coral_dim = dim;
@@ -1322,7 +1326,7 @@ static int snail_glass_tone(float lx, float ly, float sx, float sy, float clock,
 typedef struct { int y; uint32_t w; uint16_t have; src_t s[SN_NONE]; } sn_row_t;
 static inline void snail_put(ctx_t *c, int x, int y, int tone, float tint, sn_row_t *r) {
     if (tone == SN_NONE || !CTX_IN(c, x, y)) return;
-    if (r->y != y) { r->y = y; r->have = 0; r->w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y); }
+    if (r->y != y) { r->y = y; r->have = 0; r->w = wall_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y); }
     if (!(r->have >> tone & 1)) { r->s[tone] = src_color(mix(r->w, SNAIL_RGB[tone], tint), c->dim); r->have |= (uint16_t)(1u << tone); }
     px_blend_s(c, x, y, &r->s[tone], 255);
 }
@@ -1477,7 +1481,7 @@ static void draw_urchin(ctx_t *c, const tank_t *t) {
     int cx = (int)floorf(t->urchin_x + 0.5f), cy = (int)URCHIN_FLOOR_Y;
     for (int ly = -16; ly <= (int)UR_BASE; ly++) {
         int y = cy + ly;
-        uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
+        uint32_t w = wall_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int lx = -18; lx <= 18; lx++) {
             int tone = urchin_tone((float)lx + 0.5f, (float)ly + 0.5f, &p);
             if (tone == UR_NONE || !CTX_IN(c, cx + lx, y)) continue;
@@ -1650,7 +1654,7 @@ static void cl_tint_fill(int scheme, float dim) {
     }
     for (int r = 0; r < CL_H; r++) {
         int y = CL_FY - CL_H + r;
-        uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
+        uint32_t w = wall_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int k = 1; k < CL_TONES; k++) ds()->cl_row[k][r] = rgb565(mix(w, tone[k], 0.90f), dim);
     }
     g_cl_scheme = scheme; g_cl_dim = dim;
@@ -1824,40 +1828,87 @@ static int g_scene_cl_x = -2, g_scene_cl_z = -1, g_scene_cl_q = -1, g_scene_cl_s
  * frame. The rectangle: a 14 px strip of speckled stones in four tones. The
  * bowl: the same speckle in 2 px grains over a bed that runs ~70 px down to
  * the glass, pebbles scattered through it, darkening with depth. */
+/* the deck (Trubbles, 2026-10-08; it was the pebbled sand): steel tread
+ * plate from the deck line down - a lit top edge, a seam every 40 px, the
+ * raised diamond tread, darker with depth (and on a bowl, down to the glass) */
 static inline uint32_t floor_rgb(int x, int y) {
-#ifdef TANK_ROUND
-    uint32_t g = (uint32_t)(x >> 1) * 0x9E3779B1u ^ (uint32_t)(y >> 1) * 0x85EBCA77u;
-    g ^= g >> 15; g *= 0x2C1B3C6Du; g ^= g >> 12;
-    uint32_t tone = g % 16;
-    uint32_t col = tone < 2 ? 0x2e3b2c : tone < 5 ? 0x22301f : tone < 8 ? 0x1a2418 : 0x101a12;
-    int top = TANK_BOT - 14, cx = x / 13, cy = (y - top) / 9;            /* one pebble, or none, per 13 x 9 cell */
-    uint32_t h = (uint32_t)(cx + 7) * 0x9E3779B1u ^ (uint32_t)(cy + 3) * 0xC2B2AE35u;
-    h ^= h >> 16; h *= 0x7FEB352Du; h ^= h >> 15;
-    if (y > top + 4 && h % 8 < 3) {
-        float px = cx * 13 + 4 + (h >> 4) % 6, py = top + cy * 9 + 4 + (h >> 8) % 3;
-        float rx = 2.6f + (h >> 12) % 3, ry = 1.6f + ((h >> 16) % 3) * 0.5f;
-        float dx = (x - px) / rx, dy = (y - py) / ry;
-        if (dx * dx + dy * dy <= 1.0f) col = dy < -0.25f ? 0x44544a : (h >> 20) % 2 ? 0x334238 : 0x2a372c;   /* lit from above */
+    int top = TANK_BOT - 16, d = y - top;
+    uint32_t col;
+    if (d <= 0) col = 0x6d7a86;                                     /* the lit edge */
+    else if (d == 1) col = 0x4a5560;
+    else if (x % 40 == 0) col = 0x141a20;                           /* a plate seam */
+    else if (x % 40 == 1) col = 0x3e4852;
+    else {
+        int u = (x + y * 2) % 8, v = (x - y * 2 + 800) % 8;
+        col = (u == 0 || v == 0) ? 0x3b4550 : 0x2a323b;            /* the tread */
     }
-    float depth = (float)(y - top) / (TANK_H - top);
-    return mix(col, 0x02080a, depth < 0 ? 0 : depth * 0.55f);
-#else
-    uint32_t h2 = (uint32_t)((x * 73856093u) ^ (y * 19349663u));
-    uint32_t tone = (h2 >> 4) % 16;
-    return tone < 2 ? 0x2e3b2c : tone < 5 ? 0x22301f : tone < 8 ? 0x1a2418 : 0x101a12;
-#endif
+    float depth = (float)d / (TANK_H - top);
+    return mix(col, 0x05080b, depth < 0 ? 0 : depth > 1 ? 0.6f : depth * 0.6f);
 }
-/* the pod's shelves (Trubbles, 2026-10-08): a slab of warm stone with a
- * lit top lip and a shadowed underside, at tank_ledge's geometry; and the nook */
+/* the wall's detail, laid on the wall in the bake (and the plain scene):
+ * panel seams with a lit lower lip, rivets at the crossings, and the round
+ * viewport at the top - deep space and stars, in a steel ring with a glint.
+ * vig: apply the porthole vignette as the wall itself has it (the bake) */
+static void wall_px(uint16_t *buf, int stride, int x, int y, uint32_t rgb, float dim, bool vig) {
+    if (x < 0 || y < 0 || x >= TANK_W || y >= TANK_BOT - 16) return;
+    int inv = vig ? 256 - vig_alpha(x, y) : 256;
+    int r = (int)(((rgb >> 16) & 255) * dim) * inv >> 8, g = (int)(((rgb >> 8) & 255) * dim) * inv >> 8,
+        b = (int)((rgb & 255) * dim) * inv >> 8;
+    buf[y * stride + x] = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+}
+#define WALL_VP_R 40
+static void wall_viewport(float *cx, float *cy) { *cx = TANK_W * 0.5f; *cy = TANK_BOT * 0.17f; }
+static void draw_wall_detail(uint16_t *buf, int stride, float dim, bool vig) {
+    const int seam_y[2] = { (int)(TANK_BOT * 0.20f), (int)(TANK_BOT * 0.62f) };
+    const int seam_x[2] = { (int)(TANK_W * 0.25f), (int)(TANK_W * 0.75f) };
+    for (int k = 0; k < 2; k++)
+        for (int x = 0; x < TANK_W; x++) {
+            wall_px(buf, stride, x, seam_y[k], mix(wall_rgb(seam_y[k]), 0x05080c, 0.6f), dim, vig);
+            wall_px(buf, stride, x, seam_y[k] + 1, mix(wall_rgb(seam_y[k] + 1), 0x46525e, 0.35f), dim, vig);
+        }
+    for (int k = 0; k < 2; k++)
+        for (int y = 0; y < TANK_BOT - 16; y++) {
+            wall_px(buf, stride, seam_x[k], y, mix(wall_rgb(y), 0x05080c, 0.6f), dim, vig);
+            wall_px(buf, stride, seam_x[k] + 1, y, mix(wall_rgb(y), 0x46525e, 0.35f), dim, vig);
+        }
+    for (int i = 0; i < 2; i++)                                      /* rivets either side of each crossing */
+        for (int j = 0; j < 2; j++)
+            for (int o = -1; o <= 1; o += 2) {
+                int rx = seam_x[j] + o * 7, ry = seam_y[i] + o * 6;
+                wall_px(buf, stride, rx, ry, 0x56626e, dim, vig);
+                wall_px(buf, stride, rx + 1, ry + 1, 0x0a0f14, dim, vig);
+            }
+    float vx, vy; wall_viewport(&vx, &vy);
+    const int R = WALL_VP_R, RO = WALL_VP_R + 5;
+    for (int y = (int)vy - RO; y <= (int)vy + RO; y++)
+        for (int x = (int)vx - RO; x <= (int)vx + RO; x++) {
+            float dx = x - vx, dy = y - vy, d = sqrtf(dx * dx + dy * dy);
+            if (d > RO) continue;
+            uint32_t col;
+            if (d > R) col = (dy < 0) ? 0x7a8692 : 0x46515c;             /* the ring, lit from above */
+            else if (d > R - 1) col = 0x101418;
+            else {
+                uint32_t h = (uint32_t)(x * 73856093u) ^ (uint32_t)(y * 19349663u);
+                h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+                col = mix(0x070b1c, 0x141032, (dx + dy + 2 * R) / (4.0f * R));   /* deep space, a hint of violet */
+                if (h % 83 == 0) col = (h >> 8) % 3 ? 0xa9b8d6 : 0xffffff;      /* stars */
+                else if (h % 251 == 1) col = 0xffe2a8;
+                if (dx < -R * 0.2f && dy < -R * 0.2f && fabsf(dx - dy * 0.2f + R * 0.55f) < 1.2f) col = mix(col, 0xffffff, 0.35f);   /* the glint */
+            }
+            wall_px(buf, stride, x, y, col, dim, vig);
+        }
+}
+/* the pod's shelves (Trubbles, 2026-10-08): steel brackets with a lit top
+ * lip and a shadowed underside, at tank_ledge's geometry; and the nook */
 static void draw_ledges(ctx_t *c) {
     for (int i = 0; i < N_LEDGES; i++) {
         float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
         float xs[4] = { x0, x1, x1 - 6, x0 + 6 }, ys[4] = { top, top, top + 12, top + 12 };
-        fill_poly(c, xs, ys, 4, 0x6b5a48);
+        fill_poly(c, xs, ys, 4, 0x48525c);
         float ls[4] = { x0, x1, x1, x0 }, ly[4] = { top, top, top + 3, top + 3 };
-        fill_poly(c, ls, ly, 4, 0x9c8668);
+        fill_poly(c, ls, ly, 4, 0x7f8b97);
         float ss[4] = { x0 + 6, x1 - 6, x1 - 8, x0 + 8 }, sy[4] = { top + 10, top + 10, top + 13, top + 13 };
-        fill_poly(c, ss, sy, 4, 0x3e3328);
+        fill_poly(c, ss, sy, 4, 0x20262c);
     }
     /* the sleeping nook: a woven nest on the floor at the left end */
     float nx, ny; tank_nook(&nx, &ny);
@@ -1872,21 +1923,21 @@ static void draw_ledges(ctx_t *c) {
 
 static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     ctx_t c = ctx_full(fb, stride, dim);
-    /* water gradient #0a3c46 → #08272f → #031015 */
+    /* the pod's wall #1f2a35 -> #161e28 -> #0a0f16 (wall_rgb) */
     for (int y = 0; y < TANK_H; y++) {
-        uint16_t v = rgb565(water_rgb(y), dim);
+        uint16_t v = rgb565(wall_rgb(y), dim);
         for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = v;
     }
-    /* pebbled bottom: irregular top edge, speckled stones in three tones.
-       All variation comes from a position hash so it is stable every frame. */
+    /* the deck: steel tread plate (floor_rgb), from a position hash so it is
+       stable every frame */
     for (int x = 0; x < TANK_W; x++) {
-        uint32_t h = (uint32_t)(x * 2654435761u);
-        int top = TANK_BOT - 14 - (int)((h >> 8) % 5);
+        int top = TANK_BOT - 16;
         for (int y = top; y < TANK_H; y++) {
             uint32_t col = floor_rgb(x, y);
             fb[y * stride + x] = rgb565(col, dim);
         }
     }
+    draw_wall_detail(fb, stride, dim, false);
     /* (the dark oval under the left bed - the "reef rock" - is gone, 2026-10-02:
        it stood for nothing; the reef is the cluster the keeper buys) */
     draw_ledges(&c);
@@ -1906,7 +1957,7 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
 static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
     static const uint8_t bayer[4][4] = { {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5} };
     for (int y = 0; y < TANK_H; y++) {
-        uint32_t col = water_rgb(y);
+        uint32_t col = wall_rgb(y);
         int r = (int)(((col >> 16) & 255) * dim), g = (int)(((col >> 8) & 255) * dim), b = (int)((col & 255) * dim);
         for (int x = 0; x < TANK_W; x++) {
             int a = vig_alpha(x, y);
@@ -1920,11 +1971,10 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
             sc[y * TANK_W + x] = (uint16_t)((r5 << 11) | (g6 << 5) | b5);
         }
     }
-    /* pebbled bottom: irregular top edge, speckled stones in three tones,
-       stable position hash; vignetted in 8-bit before quantising */
+    /* the deck: steel tread plate, stable position hash; vignetted in 8-bit
+       before quantising */
     for (int x = 0; x < TANK_W; x++) {
-        uint32_t h = (uint32_t)(x * 2654435761u);
-        int top = TANK_BOT - 14 - (int)((h >> 8) % 5);
+        int top = TANK_BOT - 16;
         for (int y = top; y < TANK_H; y++) {
             uint32_t col = floor_rgb(x, y);
             int inv = 256 - (g_vig ? g_vig[y * TANK_W + x] : vig_alpha(x, y));
@@ -1934,6 +1984,7 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
             sc[y * TANK_W + x] = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
         }
     }
+    draw_wall_detail(sc, TANK_W, dim, true);      /* seams, rivets, the viewport - vignetted as the wall is */
     ctx_t c = ctx_full(sc, TANK_W, dim);
     draw_ledges(&c);
     if (g_scene_castle_x >= 0) draw_castle(&c, g_scene_castle_x, 0, true);   /* the castle, unless it is being dragged */
@@ -2043,13 +2094,24 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
             fill_ellipse(&c, t->food[i].x - 0.8f, t->food[i].y - 0.8f, 1.0f, 1.0f, 0xffe9bd, 255);
             DYN_RECT((int)t->food[i].x - 5, (int)t->food[i].y - 5, (int)t->food[i].x + 5, (int)t->food[i].y + 5);
         }
-    /* bubbles */
+    /* the air vent (Trubbles, 2026-10-08; it was the bubble column): a grille
+       set in the deck where the keeper put the column, and the motes - the
+       bubbles, same physics - drifting up: the vent's stream brighter, the
+       pod's dust faint */
+    {
+        int vx = (int)t->bubble_x, vy = TANK_BOT - 16;
+        rect_fill(&c, vx - 15, vy, 30, 5, 0x10161c);
+        for (int k = -12; k <= 12; k += 4) rect_fill(&c, vx + k, vy + 1, 2, 3, 0x56626e);
+        DYN_RECT(vx - 16, vy - 1, vx + 16, vy + 6);
+    }
     for (int i = 0; i < MAX_BUBBLE; i++) {
         const bubble_t *b = &t->bubble[i];
-        float r = b->column ? 2.6f : 1.8f;
-        fill_ellipse(&c, b->x, b->y, r, r, 0x9fd8e2, 60);
-        px_blend(&c, (int)(b->x - r * 0.4f), (int)(b->y - r * 0.4f), 0xffffff, 120);
-        DYN_RECT((int)b->x - 5, (int)b->y - 5, (int)b->x + 5, (int)b->y + 5);
+        if (b->y > TANK_BOT - 16) continue;           /* still under the deck */
+        if (b->column) {
+            fill_ellipse(&c, b->x, b->y, 1.3f, 1.3f, 0xcfd8e0, 110);
+            px_blend(&c, (int)b->x, (int)b->y, 0xffffff, 90);
+        } else px_blend(&c, (int)b->x, (int)b->y, 0xb8c4cc, 70);
+        DYN_RECT((int)b->x - 3, (int)b->y - 3, (int)b->x + 3, (int)b->y + 3);
     }
     /* the shrimp school: on the sand and in the grass, under the fish and
        the front fronds (the grass is their cover) */
@@ -2799,7 +2861,7 @@ void render_confirm_reset(uint16_t *fb, int stride, float frac) {
     const int X = RENDER_CONFIRM_X, Y = RENDER_CONFIRM_Y, W = RENDER_CONFIRM_W, H = RENDER_CONFIRM_H;
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, 0x9fd8e2); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    const char *title = "RESET TANK?";
+    const char *title = "RESET POD?";
     draw_text(&c, X + (W - text_w(title, 3)) / 2, Y + 20, 3, 0xffffff, title);
     const char *l1 = "START OVER WITH ONE PIP", *l2 = "EVERYTHING ELSE IS LOST";
     draw_text(&c, X + (W - text_w(l1, 2)) / 2, Y + 58, 2, 0x9fd8e2, l1);
@@ -3164,7 +3226,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         char bal[16]; snprintf(bal, sizeof bal, "%d", (int)t->sd_balance);
         draw_text(&c, MSP_SD_X + (MSP_ICON - text_w(bal, 2)) / 2, MSP_TANK_Y + 34, 2, 0xffffff, bal);
     }
-    draw_text(&c, 92, MSP_TANK_Y + 2, 2, MSP_TEAL, "TANK");
+    draw_text(&c, 92, MSP_TANK_Y + 2, 2, MSP_TEAL, "POD");
     for (int k = 0; k < POP_CAP; k++)        /* population strip: who is here, who could still arrive */
         fish_glyph(&c, 96 + k * 14, MSP_TANK_Y + 30, 2.8f, k < t->n_fish ? MSP_TEAL : MSP_DIM);
     int nb = tank_badge_n(t), np = tank_pages(t);
@@ -3226,7 +3288,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
             snprintf(g_ms_title, sizeof g_ms_title, "%s", f->name);
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", STAGE_WORDS[f->stage & 3]);
             if (g_ms_sell_armed) snprintf(g_ms_sub, sizeof g_ms_sub, "TAP AGAIN TO SELL");
-            else if (can) snprintf(g_ms_sub, sizeof g_ms_sub, "WORTH %d SAND DOLLARS", worth);
+            else if (can) snprintf(g_ms_sub, sizeof g_ms_sub, "WORTH %d CREDITS", worth);
             else if (g_ms_sell_asked) snprintf(g_ms_sub, sizeof g_ms_sub, t->n_fish <= FISH_KEEP_MIN ? "KEEP AT LEAST TWO FISH" : "NAME THE NEW PIP FIRST");
             else g_ms_sub[0] = 0;                  /* (the line's room stays: the buttons never move) */
         }
@@ -3369,13 +3431,13 @@ static int ms_open(const tank_t *t, int row, bool tank_row, bool fry_row, int k,
         } else return MS_TAP_NONE;
     } else if (tank_row) {
         if (k < 0) {
-            snprintf(g_ms_title, sizeof g_ms_title, "TANK");
-            snprintf(g_ms_caption, sizeof g_ms_caption, "%d OF %d FISH SO FAR", t->n_fish, POP_CAP);
+            snprintf(g_ms_title, sizeof g_ms_title, "POD");
+            snprintf(g_ms_caption, sizeof g_ms_caption, "%d OF %d TRUBBLES SO FAR", t->n_fish, POP_CAP);
             g_ms_lit = true; g_ms_icon = NULL; g_ms_fish = -1;
         } else {
             uint32_t bit = tank_badge(t, k)->bit; bool on = (t->tank_ms_bits & bit) != 0;
             g_ms_tpage = k / MSP_PER_ROW;            /* the arrows can cross pages: the row follows */
-            snprintf(g_ms_title, sizeof g_ms_title, on ? "TANK" : "NOT YET");
+            snprintf(g_ms_title, sizeof g_ms_title, on ? "POD" : "NOT YET");
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", TMS_NAMES[bit_index(bit)]);
             g_ms_lit = on; g_ms_icon = tank_badge(t, k)->icon; g_ms_fish = -1;
         }
@@ -3439,7 +3501,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
     const int X = MSP_MODAL_X, W = MSP_MODAL_W, Y = MSP_MODAL_Y, H = MSP_MODAL_H;
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    char title[FISH_NAME_MAX + 16] = "THE TANK", caption[40] = "";
+    char title[FISH_NAME_MAX + 16] = "THE POD", caption[40] = "";
     const char *caption2 = NULL;                              /* a second line: the title and both move up */
     const icon_t *ic = NULL;
     const fish_t *f = fish >= 0 && fish < t->n_fish ? &t->fish[fish] : NULL;
@@ -3533,7 +3595,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     ctx_t c = ctx_page(fb, stride);
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
     blit_icon(&c, SHP_COIN_X, SHP_COIN_Y, &icon_shop_sand_dollar_64, 255);
-    draw_text(&c, SHP_HEAD_X, SHP_COIN_Y + 6, 2, MSP_TEAL, "SAND DOLLARS");
+    draw_text(&c, SHP_HEAD_X, SHP_COIN_Y + 6, 2, MSP_TEAL, "CREDITS");
     char bal[16]; snprintf(bal, sizeof bal, "%d", (int)t->sd_balance);
     draw_text(&c, SHP_HEAD_X, SHP_COIN_Y + 28, 4, 0xffffff, bal);
     for (int x = 24; x < PAGE_W - 24; x++) px_blend(&c, x, SHP_ROW_Y0 - 10, MSP_DIM, 200);
@@ -3547,9 +3609,9 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
         if (owned) blit_icon(&c, 32, top, shop_icon(i), 255); else blit_icon_locked(&c, 32, top, shop_icon(i));   /* (the rows are where the bowl is wide: their own column) */
         draw_text(&c, 76, top + 2, 2, 0xffffff, it->name);
-        if (owned) draw_text(&c, 76, top + 20, 2, MSP_TEAL, "IN THE TANK");
+        if (owned) draw_text(&c, 76, top + 20, 2, MSP_TEAL, "IN THE POD");
         else price_tag(&c, 76, top + 20, it->price, can ? MSP_TEAL : MSP_DIM);
-        if (owned)     button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "IN TANK", 2);
+        if (owned)     button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "IN POD", 2);
         else if (can) { button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                         draw_text(&c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
         else           button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
@@ -3582,14 +3644,14 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - 12 - MSP_HOW_H;
     if (owned && tank_decor_placeable(g_shp_modal)) {         /* a placeable piece: MOVE re-opens the placement page, SELL (twice) sells it back */
         char sell[24]; snprintf(sell, sizeof sell, "SELLS BACK FOR %d", progression_sell_value(g_shp_modal));
-        draw_text(&c, X + (W - text_w("IN THE TANK", 2)) / 2, Y + 164, 2, MSP_TEAL, "IN THE TANK");
+        draw_text(&c, X + (W - text_w("IN THE POD", 2)) / 2, Y + 164, 2, MSP_TEAL, "IN THE POD");
         draw_text(&c, X + (W - text_w(sell, 2)) / 2, Y + 184, 2, MSP_DIM, sell);
         button(&c, SHP_TWO_X0, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "MOVE", 2);
         if (g_shp_sell_armed) { snprintf(sell, sizeof sell, "+%d OK?", progression_sell_value(g_shp_modal));
                                 button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, sell, 2);
                                 draw_text(&c, SHP_TWO_X1 + (MSP_HOW_W - text_w(sell, 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, sell); }
         else button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "SELL", 2);
-    } else if (owned) draw_text(&c, X + (W - text_w("IN THE TANK", 2)) / 2, by + 8, 2, MSP_TEAL, "IN THE TANK");   /* the snail: a permanent resident */
+    } else if (owned) draw_text(&c, X + (W - text_w("IN THE POD", 2)) / 2, by + 8, 2, MSP_TEAL, "IN THE POD");   /* the snail: a permanent resident */
     else {
         char line[32]; snprintf(line, sizeof line, "%d", it->price);
         int pw = 20 + text_w(line, 2);
@@ -3723,7 +3785,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
-    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
+    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "TRUBBLES ARE QUIET AT NIGHT");
     /* LIGHTS OUT: < the choice > */
     {
         int ch = tank_light_choice(t), y = SET_SEG_Y(SET_ROW3_Y);
