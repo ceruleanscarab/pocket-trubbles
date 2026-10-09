@@ -562,7 +562,7 @@ def ask_ollama(host, model, state, timeout):
         "stream": False,
         "think": False,
         "keep_alive": "5m",
-        "options": {"temperature": 0.7, "num_predict": 48, "num_ctx": 512},
+        "options": {"temperature": 0.7, "num_predict": 48, "num_ctx": 2048},
     }).encode()
     # Transport is curl, not urllib. Root cause found 2026-08-21: Little Snitch
     # had a per-process rule allowing this app's Python only to pypi.org /
