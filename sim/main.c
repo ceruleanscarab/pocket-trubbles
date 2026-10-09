@@ -3969,6 +3969,21 @@ static int selftest_goals(void) {
              hid ? "hid" : "never hid", tucked ? "tucked under a shelf" : "never tucked", i / 60.0f);
       if (!hid || !tucked) { printf("FAIL: three quick taps did not send a shy Trubble into hiding\n"); return 1; }
       if (i >= 60 * 60) { printf("FAIL: the frightened Trubble never came out of hiding\n"); return 1; } }
+    /* markings (2026-10-09): the keeper's accent comes in as it grows - none
+       on a pip, spots on a fluff (its card portrait, magenta on teal) */
+    { static uint16_t mfb[TANK_W * TANK_H];
+      fish_t w = tank.fish[0]; w.color = 0x40c0c0; w.accent = 0xff00ff;
+      int spots[2];
+      for (int k = 0; k < 2; k++) {
+          memset(mfb, 0, sizeof mfb);
+          w.stage = k ? STAGE_ADULT : STAGE_FRY;
+          render_fish_portrait(mfb, TANK_W, 200, 150, 2.0f, &w, 0);
+          spots[k] = 0;
+          for (int q = 0; q < TANK_W * TANK_H; q++) { uint16_t v = mfb[q];
+              spots[k] += (v >> 11) > 24 && (v & 31) > 18 && ((v >> 5) & 63) < 30; }
+      }
+      printf("selftest-goals: markings - %d accent px on a pip, %d on a fluff\n", spots[0], spots[1]);
+      if (spots[0] != 0 || spots[1] < 20) { printf("FAIL: markings should come in as a Trubble grows\n"); return 1; } }
     return 0;
 }
 

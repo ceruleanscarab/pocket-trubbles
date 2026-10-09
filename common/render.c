@@ -206,12 +206,12 @@ static float trub_hash(int i, int k) {
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 /* the warm glow: the content drive, from middling (4) to full (9) */
 static float trub_content(const fish_t *f) { return clamp01((f->content - 4) / 5); }
-static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drowsy) {
+/* a colour through the Trubble's mood - its fur, and its markings with it */
+static uint32_t trub_mood(uint32_t c, const fish_t *f, bool asleep, float *flat, float *drowsy) {
     float hungry = clamp01((f->hunger - 5) / 4);
     float stress = clamp01((f->stress - 3) / 5);
     float sleepy = asleep ? 1 : clamp01((4 - f->energy) / 4);
     float content = trub_content(f);
-    uint32_t c = f->color;
     c = mix(c, 0xffc46b, 0.50f * content);             /* warm */
     c = mix(c, 0xffffff, 0.20f * content);             /* ... and bright */
     c = mix(c, 0xd9d6cf, 0.55f * hungry);              /* pale */
@@ -220,6 +220,9 @@ static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drows
     c = mix(c, 0x000000, 0.30f * sleepy);              /* ... and darker */
     *flat = stress; *drowsy = sleepy;
     return c;
+}
+static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drowsy) {
+    return trub_mood(f->color, f, asleep, flat, drowsy);
 }
 /* hush: fur pressed flat (hiding); glow: 0..1 warm light (the bud's tell);
    unborn: a bud's lump - eyes shut, fur undimmed */
@@ -268,6 +271,23 @@ static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool aslee
     }
     /* the ball, and a soft light on its upper side */
     fill_ellipse(c, cx, cy, rx, ry, fur, 255);
+    /* markings (2026-10-09): the keeper's accent colour, coming in as it grows
+       - none on a pip, two small spots on a tuft, three on a fluff - patches
+       in the fur that turn with the roll like the tufts, through the fur's
+       mood at half strength, under the light and the eyes */
+    if (f->stage >= STAGE_JUV && !unborn) {
+        float fl, dr;
+        uint32_t mk = mix(trub_mood(f->accent, f, asleep, &fl, &dr), f->accent, 0.5f);   /* mood at half strength: they stay readable */
+        if (glow > 0) mk = mix(mk, 0xffd98a, 0.55f * glow);
+        int n = f->stage == STAGE_JUV ? 2 : 3;
+        float sz = f->stage == STAGE_JUV ? 0.20f : 0.27f;
+        for (int k = 0; k < n; k++) {
+            float a = f->roll + k * 2.2f + trub_hash(k, f->preset + 3) * 0.8f;
+            float d = 0.42f + 0.18f * trub_hash(k, f->preset + 11);
+            float r = R * sz * (0.8f + 0.4f * trub_hash(k, f->preset + 19));
+            fill_ellipse(c, cx + cosf(a) * rx * d, cy + sinf(a) * ry * d, r * sx, r * sy, mk, 255);
+        }
+    }
     fill_ellipse(c, cx - 0.22f * rx, cy - 0.30f * ry, rx * 0.55f, ry * 0.42f, fur_lite, 70);
     fill_ellipse(c, cx, cy + 0.55f * ry, rx * 0.75f, ry * 0.30f, fur_dark, 60);
     /* eyes: big, set toward the way it faces; shut to a lid line asleep.
