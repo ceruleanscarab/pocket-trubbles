@@ -7,6 +7,7 @@ asks the teacher ~300 questions on a fixed diagnostic panel and prints the
 conditional rates the student will inherit - ~7 minutes with 3 workers, not
 8 hours. Use it to compare prompts, or teachers (--model qwen3.5:27b ...).
 
+  python3 prompt_check.py --host http://localhost:11434    # the Trubbles panel (the default, 2026-10-09)
   python3 prompt_check.py --schema 3                       # current v3 prompt
   python3 prompt_check.py --schema 3 --prompt-file cand.txt # a candidate prompt
   python3 prompt_check.py --schema 3 --model qwen3.5:27b   # another teacher
@@ -84,9 +85,95 @@ def panel(rng, schema, n):
     return P
 
 
+# ---- the Trubbles panel (2026-10-09, model/trubbles_schema.md) ----
+# one pinned situation per teacher priority on a calm, fed, daytime base;
+# each with the share of the teacher's answers it should (or must not) get
+def trubbles_state(rng, **pin):
+    clock = lambda d: f"{d} {rng.randint(1, 12)}"
+    f = dict(zone=rng.randint(1, 6), hunger=rng.randint(0, 3), energy=rng.randint(5, 9), stress=rng.randint(0, 2),
+             content=rng.randint(4, 7), curiosity=rng.randint(3, 7), bored=rng.randint(0, 2), crowd=rng.randint(0, 3),
+             cuddly=rng.randint(2, 7), bold=rng.randint(2, 7), chatty=rng.randint(2, 7),
+             stage=rng.choice(["pip", "tuft", "fluff", "fluff"]), bond=rng.randint(2, 7),
+             food="none", friend=clock(rng.choice(["near", "mid"])), pile="none", nook=clock(rng.choice(["mid", "far"])),
+             keeper="away", chorus="off", last=rng.choice(["explore", "roll", "nap", "chirp"]), time="day")
+    f.update(pin)
+    return " ".join(f"{k} {f[k]}" for k in ("zone", "hunger", "energy", "stress", "content", "curiosity", "bored", "crowd",
+                                          "cuddly", "bold", "chatty", "stage", "bond", "food", "friend", "pile", "nook",
+                                          "keeper", "chorus", "last", "time"))
+
+
+TRUBBLES_CASES = [   # (case, pins, goal, test, threshold)
+    ("starving",        dict(hunger=9, food="near 3"),                       "eat",          ">=", 0.95),
+    ("hungry_nofood",   dict(hunger=9, bond=8),                              "greet_keeper", ">=", 0.50),
+    ("hungry_nofood",   None,                                                "eat",          "==", 0.0),
+    ("terrified_shy",   dict(stress=9, bold=1),                              "hide",         ">=", 0.80),
+    ("stressed_bold",   dict(stress=6, bold=9),                              "hide",         "<=", 0.50),
+    ("night",           dict(time="night", energy=5),                        "nap",          ">=", 0.80),
+    ("exhausted",       dict(energy=1),                                      "nap",          ">=", 0.70),
+    ("keeper_bonded",   dict(keeper="near", bond=9),                         "greet_keeper", ">=", 0.50),
+    ("keeper_wary",     dict(keeper="near", bond=0),                         "greet_keeper", "<=", 0.20),
+    ("chorus_chatty",   dict(chorus="on", chatty=9),                         "chirp",        ">=", 0.50),
+    ("crowded_cuddly",  dict(crowd=8, cuddly=9, friend="near 3"),            "cuddle",       "<=", 0.20),
+    ("cuddly_friend",   dict(cuddly=9, friend="near 3", crowd=1),            "cuddle",       ">=", 0.40),
+    ("lonely",          dict(friend="none", pile="none"),                    "cuddle",       "==", 0.0),
+    ("lonely",          None,                                                "eat",          "==", 0.0),
+    ("bored_explore",   dict(bored=9, last="explore", curiosity=8),          "explore",      "<=", 0.15),
+    ("fresh_roll",      dict(bored=0, last="roll", content=8, energy=8),     "roll",         ">=", 0.30),
+]
+
+
+def trubbles_main(args):
+    gt.SCHEMA = "trubbles"
+    if args.prompt_file:
+        gt.SYSTEM_PROMPT_TRUBBLES = open(args.prompt_file).read().strip()
+    rng = random.Random(args.seed)
+    P, pins = [], {}
+    for case, pin, *_ in TRUBBLES_CASES:
+        if pin is not None:
+            pins[case] = pin
+    pins["content"] = dict(content=8, hunger=1, stress=0, bored=1)
+    for case, pin in pins.items():
+        P += [(case, trubbles_state(rng, **pin)) for _ in range(args.n // 2)]
+    print(f"{len(P)} calls to {args.model} @ {args.host} ({args.workers} workers) ...", flush=True)
+
+    def ask(item):
+        case, st = item
+        try:
+            g = gt.ask_ollama(args.host, args.model, st, 30)
+        except Exception:  # noqa: BLE001
+            g = None
+        return case, (g.split()[0] if g else None)
+
+    results, fails = {}, 0
+    with cf.ThreadPoolExecutor(args.workers) as ex:
+        for case, goal in ex.map(ask, P):
+            if goal is None:
+                fails += 1
+                continue
+            results.setdefault(case, {}).setdefault(goal, 0)
+            results[case][goal] += 1
+    print(f"\nfailures: {fails}")
+    bad = 0
+    for case, _, goal, op, thr in TRUBBLES_CASES:
+        d = results.get(case, {}); n = sum(d.values())
+        v = d.get(goal, 0) / n if n else float("nan")
+        ok = v >= thr if op == ">=" else v <= thr if op == "<=" else v <= thr + 1e-9
+        bad += not ok
+        print(f"  {'OK ' if ok else 'BAD'}  P({goal} | {case}) = {v:.2f}  (n={n}, want {op} {thr})")
+    d = results.get("content", {}); n = sum(d.values()) or 1
+    mx = max(d.values()) / n if d else 0
+    bad += mx >= 0.45
+    print(f"  {'OK ' if mx < 0.45 else 'BAD'}  max single goal | content = {mx:.2f}  (want < 0.45)")
+    print("\n  per case:")
+    for case in pins:
+        d = results.get(case, {}); n = sum(d.values()) or 1
+        print(f"    {case:15s} " + ", ".join(f"{g} {c / n:.2f}" for g, c in sorted(d.items(), key=lambda kv: -kv[1])[:4]))
+    print(f"\n{'PASS' if not bad else f'{bad} BAD - fix the prompt before an overnight run'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=3)
+    ap.add_argument("--schema", type=lambda v: int(v) if v.isdigit() else v, choices=(2, 3, 4, "trubbles"), default="trubbles")
     ap.add_argument("--host", default="http://192.168.0.139:11434")
     ap.add_argument("--model", default="gemma4:26b")
     ap.add_argument("--prompt-file", default=None, help="candidate system prompt (default: gen_traces' prompt for the schema)")
@@ -94,6 +181,8 @@ def main():
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--seed", type=int, default=11)
     args = ap.parse_args()
+    if args.schema == "trubbles":
+        return trubbles_main(args)
     gt.SCHEMA = args.schema
     if args.prompt_file:
         txt = open(args.prompt_file).read().strip()

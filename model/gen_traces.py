@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Trace generator for the pocket-tank advisor model.
+"""Trace generator for the pocket-tank advisor model - and the Trubbles'.
+
+TRUBBLES (2026-10-09, model/trubbles_schema.md): the states come from the C
+sim through the device's own encoder, so there is no encoder here to keep in
+sync - this script only asks the teacher:
+
+  ../sim/fishsim --dump-states 40000 1 > out/trubbles_states_1.txt
+  python3 gen_traces.py --states out/trubbles_states_1.txt --dry-run --count 5
+  python3 gen_traces.py --states out/trubbles_states_1.txt --out out/trubbles_traces_1.jsonl \
+      --shard 0/2 --host http://localhost:11434      # and --shard 1/2 in a second worker
+
+It resumes: states already labelled in --out are skipped.
+
+The fish (pocket-tank's schema v2-v4) keep their own Python mini-sim below:
 
 Runs a minimal headless tank sim, encodes per-fish state per schema.md (DRAFT),
 asks Ollama (gemma4:26b, structured output) for a goal, and appends
@@ -41,7 +54,12 @@ LEISURE = ["visit_bubbles", "follow_friend", "explore", "dart_play", "inspect_re
 BORED_PER_TICK, BORED_NEW_GOAL, BORED_NEW_ZONE, BORED_RELIEF_PER_TICK = 0.08, 4.0, 1.5, 0.15
 
 
+GOALS_TRUBBLES = ["eat", "cuddle", "roll", "nap", "explore", "greet_keeper", "hide", "chirp"]
+
+
 def goals():
+    if SCHEMA == "trubbles":
+        return GOALS_TRUBBLES
     return GOALS_V4 if SCHEMA >= 4 else GOALS
 
 # Distance buckets in pixels (tank diagonal ~580).
@@ -139,7 +157,60 @@ SYSTEM_PROMPT_V4 = (
 )
 
 
+# the Trubbles (2026-10-09): model/trubbles_schema.md's teacher guidance - the
+# schema calls this part "not frozen; tune before the overnight run", and
+# pocket-tank's lesson is that the prompt is the dataset's DNA: keep the rules
+# few and run prompt_check.py --schema trubbles on a small batch first
+SYSTEM_PROMPT_TRUBBLES = (
+    "You are the instinct advisor for a Trubble: a round, fuzzy, limbless critter "
+    "with big eyes and tiny feet, living with a small colony in a side-view habitat "
+    "pod with gravity - it rolls along the floor and shelves, hops up onto ledges, "
+    "and piles up with friends. You receive one line: its zone, its drives (0-9: "
+    "hunger, energy, stress, content, curiosity, bored = how stale its current "
+    "activity is, crowd = how packed it is around it), its personality (cuddly, "
+    "bold, chatty, 0-9), its stage (pip = newly budded, tuft = half-grown, fluff = "
+    "grown), its bond with the keeper (0-9), then what it senses: the nearest food, "
+    "friend, pile (two or more Trubbles snuggled together) and the sleeping nook, "
+    "each as a distance (near, mid, far, or none) and a clock position relative to "
+    "the way it faces (12 = straight ahead, 3 = below, 6 = behind, 9 = above); "
+    "keeper near if the keeper just touched the glass; chorus on if a Trubble close "
+    "by is singing; last, its current goal; and day or night. Choose the single "
+    "most fitting goal and an urgency 0-9. "
+    "The goals: eat (roll to the food and nibble - only with food in view), cuddle "
+    "(snuggle into a pile or against a friend - only with a friend or pile in "
+    "view), roll (bounce and roll around for fun), nap (go to the nook and sleep, "
+    "or settle where it is at night), explore (hop up ledges and visit parts of "
+    "the pod it has not seen lately - a real activity, not a fallback), "
+    "greet_keeper (come to the glass and chirp at the keeper), hide (tuck away "
+    "under a shelf until calm), chirp (sing in place, starting or joining a chorus). "
+    "Priorities, in order: "
+    "1. High hunger (7-9): eat if food is in view, whatever else is going on - "
+    "unless stress is very high (8-9). With no food in view, a hungry Trubble that "
+    "trusts its keeper (bond 5 or more) may greet_keeper to ask for food. "
+    "2. High stress: hide, sooner for a shy Trubble - bold 0-3 hides from stress 5 "
+    "up, bold 7-9 only from 8 up. "
+    "3. Night, or low energy (0-2): nap. "
+    "4. keeper near: a Trubble with a strong bond (6-9) greets the keeper; one with "
+    "a weak bond (0-2) may hide instead. "
+    "5. chorus on and a chatty Trubble (6-9): chirp, joining in. "
+    "6. High crowd (7-9): avoid cuddle; prefer explore or nap. "
+    "7. High bored (7-9): choose something different from last; at 5-6, repeating "
+    "last is unlikely. "
+    "8. Otherwise personality decides: a cuddly Trubble (7-9) with a friend or pile "
+    "in view cuddles; a curious one explores; a content one that is not bored rolls "
+    "or keeps its last goal; a chatty one chirps now and then; a bold, energetic "
+    "one rolls more. "
+    "Stage shades every choice: pips are timid and stay near friends, tufts are "
+    "playful and curious, fluffs are balanced. Never choose cuddle with friend none "
+    "and pile none, or eat with food none. Keep the last goal only while it still "
+    "makes sense. Use the whole urgency range: 9 is pressing and urgent (starving, "
+    "terrified), 7-8 strong, 4-6 a normal want, 1-3 mild, 0 an idle whim."
+)
+
+
 def system_prompt():
+    if SCHEMA == "trubbles":
+        return SYSTEM_PROMPT_TRUBBLES
     return SYSTEM_PROMPT_V4 if SCHEMA >= 4 else SYSTEM_PROMPT_V3 if SCHEMA >= 3 else SYSTEM_PROMPT
 
 
@@ -514,6 +585,73 @@ def ask_ollama(host, model, state, timeout):
     return f"{goal} urgency {urgency}"
 
 
+def label_states(args):
+    """the Trubbles: ask the teacher about each state line in args.states"""
+    global SCHEMA
+    SCHEMA = "trubbles"
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from check_states import parse_state
+    shard_i, shard_n = (int(v) for v in args.shard.split("/"))
+    done = set()
+    if not args.dry_run and os.path.exists(args.out):
+        for line in open(args.out):
+            try:
+                done.add(json.loads(line)["state"])
+            except (json.JSONDecodeError, KeyError):
+                pass
+    deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
+    out = None
+    if not args.dry_run:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        out = open(args.out, "a")
+    written = failures = skipped = 0
+    try:
+        for n, state in enumerate(open(args.states)):
+            state = state.strip()
+            if not state or n % shard_n != shard_i:
+                continue
+            if written >= args.count:
+                break
+            if deadline and time.time() > deadline:
+                print(f"[max-minutes reached] stopping at {written} pairs", file=sys.stderr)
+                break
+            if state in done:
+                skipped += 1
+                continue
+            try:
+                parse_state(state)
+            except ValueError as e:
+                print(f"[skip] line {n + 1}: {e}", file=sys.stderr)
+                continue
+            if args.dry_run:
+                print(state)
+                written += 1
+                continue
+            try:
+                goal = ask_ollama(args.host, args.model, state, args.timeout)
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, OSError) as e:
+                failures += 1
+                print(f"[warn] {type(e).__name__}: {e}", file=sys.stderr)
+                if failures >= 5 and written == 0:
+                    sys.exit(f"aborting: {failures} consecutive failures reaching {args.host}")
+                continue
+            if goal is None:
+                failures += 1
+                continue
+            failures = 0
+            out.write(json.dumps({"state": state, "goal": goal}) + "\n")
+            out.flush()
+            done.add(state)
+            written += 1
+            if written % 50 == 0:
+                print(f"{written}/{args.count}")
+    finally:
+        if out:
+            out.close()
+    if not args.dry_run:
+        print(f"done: {written} new pairs -> {args.out} ({skipped} already labelled)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--count", type=int, required=True, help="number of (state, goal) pairs")
@@ -527,14 +665,19 @@ def main():
     ap.add_argument("--timeout", type=float, default=30.0, help="per-request timeout, seconds")
     ap.add_argument("--max-minutes", type=float, default=None,
                     help="hard wall-clock cap; stop cleanly when exceeded")
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=2,
+    ap.add_argument("--schema", type=lambda v: int(v) if v.isdigit() else v, choices=(2, 3, 4, "trubbles"), default=2,
                     help="state-line schema: 2 = frozen, 3 = shipped (no names, trust, 2-6 fish), "
-                         "4 = next cycle (no shadow, + bored)")
+                         "4 = next cycle (no shadow, + bored), trubbles = the Trubbles (implied by --states)")
+    ap.add_argument("--states", default=None,
+                    help="Trubbles: label these state lines (from fishsim --dump-states) instead of the fish mini-sim")
+    ap.add_argument("--shard", default="0/1", help="Trubbles: i/n - this worker takes every n-th state from the i-th")
     ap.add_argument("--repopulate", type=int, default=250,
                     help="v3: rebuild the tank with a new random population every N samples")
     args = ap.parse_args()
     global SCHEMA
     SCHEMA = args.schema
+    if args.states:
+        return label_states(args)
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
 
     rng = random.Random(args.seed)

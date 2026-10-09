@@ -36,6 +36,7 @@
  *   ./fishsim --selftest-tend        headless canopy/algae/hold-attract check
  *   ./fishsim --selftest-hunger      headless hunger economy (untended tank never ravenous)
  *   ./fishsim --selftest-goals       headless Trubbles goals: each one visibly does something; the rule stub picks each
+ *   ./fishsim --dump-states N [seed] the model's training states (trubbles_schema.md lines) on stdout, coverage on stderr
  *   ./fishsim --selftest-shop        headless sand dollars: awards, the shop, the plant, the snail, the save
  *   ./fishsim --selftest-battery     headless battery page: stretches, sleep, learned rates, estimates, the pill
  *   ./fishsim --selftest-saves       headless update promise: every save in testdata/saves, whole and cut to older builds' lengths
@@ -3969,6 +3970,23 @@ static int selftest_goals(void) {
              hid ? "hid" : "never hid", tucked ? "tucked under a shelf" : "never tucked", i / 60.0f);
       if (!hid || !tucked) { printf("FAIL: three quick taps did not send a shy Trubble into hiding\n"); return 1; }
       if (i >= 60 * 60) { printf("FAIL: the frightened Trubble never came out of hiding\n"); return 1; } }
+    /* the encoder's clock (2026-10-09): mirrored by the facing - food straight
+       below is 3 o'clock, ahead 12, above 9, behind 6, either way it faces */
+    { const float one2[1] = { TANK_W * 0.5f };
+      goal_pod(1, one2); f = &tank.fish[0];
+      static const struct { float dx, dy; int clock; } C[] = { { 0, 40, 3 }, { 40, 0, 12 }, { 0, -40, 9 }, { -40, 0, 6 } };
+      char line[400];
+      for (int face = -1; face <= 1; face += 2)
+          for (int k = 0; k < 4; k++) {
+              for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+              f->facing = (int8_t)face;
+              tank.food[0].alive = true; tank.food[0].x = f->x + C[k].dx * face; tank.food[0].y = f->y + C[k].dy;
+              advisor_core_encode(&tank, 0, line, sizeof line);
+              char want[24]; snprintf(want, sizeof want, "food near %d ", C[k].clock);
+              if (!strstr(line, want)) { printf("FAIL: facing %+d, food at (%+.0f,%+.0f): want '%s' in: %s\n", face, C[k].dx * face, C[k].dy, want, line); return 1; }
+          }
+      for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+      printf("selftest-goals: the encoder's clock - below 3, ahead 12, above 9, behind 6, facing either way\n"); }
     /* markings (2026-10-09): the keeper's accent comes in as it grows - none
        on a pip, spots on a fluff (its card portrait, magenta on teal) */
     { static uint16_t mfb[TANK_W * TANK_H];
@@ -3984,6 +4002,78 @@ static int selftest_goals(void) {
       }
       printf("selftest-goals: markings - %d accent px on a pip, %d on a fluff\n", spots[0], spots[1]);
       if (spots[0] != 0 || spots[1] < 20) { printf("FAIL: markings should come in as a Trubble grows\n"); return 1; } }
+    return 0;
+}
+
+/* --dump-states <count> [seed] (2026-10-09): the Trubbles model's training
+ * STATES, written through advisor_core_encode - the device's own encoder, so
+ * the teacher labels exactly the lines the model will be asked. Real pods of
+ * 1-6 under the rule stub, run live (positions, piles, crowding, the keeper's
+ * feedings and touches, a fright now and then, nights), sampled every few
+ * seconds; before a sample the drives are sometimes re-rolled and the keeper
+ * or a neighbour's song injected, so the schema's whole space is covered and
+ * not just the stub's habits. One line per state on stdout (model/
+ * gen_traces.py labels them); a coverage summary on stderr. */
+static uint32_t ds_rng = 1;
+static float ds_r(void) { ds_rng ^= ds_rng << 13; ds_rng ^= ds_rng >> 17; ds_rng ^= ds_rng << 5; return (ds_rng & 0xffffff) / 16777216.0f; }
+static float ds_u(float lo, float hi) { return lo + (hi - lo) * ds_r(); }
+static int dump_states(int count, uint32_t seed) {
+    setenv("POCKET_TANK_SAVE", "/dev/null/pocket-tank-dump.sav", 1);   /* never saves */
+    ds_rng = seed ? seed * 2654435761u : 1;
+    const float DT = 1.0f / 30.0f;
+    int written = 0, pods[N_FISH_MAX + 1] = {0}, night = 0, keeper = 0, chorus = 0, pile = 0, food = 0, friend = 0;
+    char line[400];
+    for (int ep = 0; written < count; ep++) {
+        tank_init(&tank, seed * 7919u + (uint32_t)ep);
+        tank_new_population(&tank);
+        float pick = ds_r();                       /* the pod's size: lone and small pods common, a full six now and then */
+        int n = pick < 0.22f ? 1 : pick < 0.42f ? 2 : pick < 0.60f ? 3 : pick < 0.76f ? 4 : pick < 0.89f ? 5 : 6;
+        while (tank.n_fish < n) tank_add_fish(&tank, 0, 0);
+        tank.n_fish = n;
+        tank.light_override = true; tank.light_on = ds_r() > 0.22f;
+        for (int i = 0; i < n; i++) {
+            fish_t *f = &tank.fish[i];
+            f->stage = (stage_t)(ds_r() < 0.2f ? STAGE_FRY : ds_r() < 0.3f ? STAGE_JUV : ds_r() < 0.85f ? STAGE_ADULT : STAGE_ELDER);
+            f->bold = ds_u(0, 1); f->sociable = ds_u(0, 1); f->chatty = ds_u(0, 1);   /* the whole range: 0 and 9 included */
+            f->trust = ds_u(0, 10); f->hunger = ds_u(0, 9); f->energy = ds_u(1, 10); f->content = ds_u(1, 9);
+            f->x = ds_u(TANK_FX0 + 30, TANK_FX1 - 30); f->y = ds_u(40, TANK_BOT - 40); f->perch = PERCH_AIR;
+        }
+        int ticks = (int)(ds_u(20, 70) / DT);
+        int every = (int)(ds_u(2.5f, 6) / DT);
+        for (int k = 0; k < ticks && written < count; k++) {
+            if (ds_r() < 0.08f * DT) tank_feed(&tank, ds_u(TANK_FX0 + 30, TANK_FX1 - 30), 1 + (int)(ds_r() * 3));   /* the keeper feeds */
+            if (ds_r() < 0.04f * DT) tank_touch_hold(&tank, ds_u(40, TANK_W - 40), ds_u(80, TANK_BOT - 20));   /* ... touches */
+            if (ds_r() < 0.015f * DT) { float x = ds_u(40, TANK_W - 40), y = ds_u(80, TANK_BOT - 30);
+                                         for (int q = 0; q < 3; q++) tank_touch_tap(&tank, x, y); }        /* ... a fright */
+            tank_tick(&tank, DT, advisor_rules);
+            if (k < (int)(4 / DT) || k % every) continue;
+            int i = (int)(ds_r() * n); if (i >= n) i = n - 1;
+            fish_t *f = &tank.fish[i];
+            fish_t keep = *f;                     /* perturb for the line only, then put it back */
+            float keeper_s = tank.keeper_s;
+            if (ds_r() < 0.5f) {                  /* re-roll the drives: the stub keeps them fed, calm and fresh, so the
+                                                     hungry, frightened and bored corners are filled here */
+                f->hunger = ds_u(0, 10); f->energy = ds_u(0, 10); f->stress = ds_r() < 0.55f ? ds_u(0, 5) : ds_u(5, 10);
+                f->content = ds_u(0, 10); f->curiosity = ds_u(0, 10); f->bored = ds_r() < 0.5f ? ds_u(0, 5) : ds_u(5, 10);
+            }
+            if (ds_r() < 0.22f) tank.keeper_s = 0;            /* the keeper at the glass */
+            int sing = -1;
+            if (n > 1 && ds_r() < 0.18f) {                    /* a neighbour singing */
+                sing = (i + 1 + (int)(ds_r() * (n - 1))) % n;
+                if (tank.fish[sing].chirp_s <= 0) tank.fish[sing].chirp_s = 1; else sing = -1;
+            }
+            advisor_core_encode(&tank, i, line, sizeof line);
+            puts(line);
+            written++; pods[n]++;
+            night += tank.night; keeper += tank_keeper_near(&tank); chorus += tank_chorus(&tank, i);
+            pile += strstr(line, "pile none") == NULL; food += strstr(line, "food none") == NULL; friend += strstr(line, "friend none") == NULL;
+            *f = keep; tank.keeper_s = keeper_s;
+            if (sing >= 0) tank.fish[sing].chirp_s = 0;
+        }
+    }
+    fprintf(stderr, "dump-states: %d lines | pods 1..6: %d %d %d %d %d %d | night %d%% keeper near %d%% chorus on %d%% "
+            "| a pile in view %d%% food %d%% a friend %d%%\n", written, pods[1], pods[2], pods[3], pods[4], pods[5], pods[6],
+            100 * night / written, 100 * keeper / written, 100 * chorus / written, 100 * pile / written, 100 * food / written, 100 * friend / written);
     return 0;
 }
 
@@ -4354,6 +4444,8 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--hero") == 0 && a + 1 < argc) return hero_shot(argv[a + 1]);
         if (strcmp(argv[a], "--clip") == 0 && a + 1 < argc)
             return clip(argv[a + 1], a + 2 < argc ? atoi(argv[a + 2]) : 6);
+        if (strcmp(argv[a], "--dump-states") == 0 && a + 1 < argc)
+            return dump_states(atoi(argv[a + 1]), a + 2 < argc ? (uint32_t)strtoul(argv[a + 2], NULL, 10) : 1);
         if (strcmp(argv[a], "--snapshot") == 0 && a + 1 < argc)
             return snapshot(argv[a + 1], a + 2 < argc ? atoi(argv[a + 2]) : 20);
         if (strcmp(argv[a], "--selftest") == 0) return selftest();
