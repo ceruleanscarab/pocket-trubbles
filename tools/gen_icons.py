@@ -9,13 +9,52 @@ blit_icon() (which can also scale alpha for dimming/unrevealed states).
 Run from anywhere; paths are repo-relative to this file:
     ~/.venvs/pocket-tank/bin/python tools/gen_icons.py
 """
-import os, re, sys
-from PIL import Image
+import os, re, struct, sys, zlib
+try:
+    from PIL import Image
+except ImportError:          # (2026-10-09) a machine without Pillow: the built-in reader below
+    Image = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "assets", "icons")
 OUT_C = os.path.join(ROOT, "common", "icons.c")
 OUT_H = os.path.join(ROOT, "common", "icons.h")
+
+
+def read_rgba(path):
+    """(w, h, [(r, g, b, a), ...]) - Pillow when there is one, else a minimal
+    reader for what the icons are: 8-bit RGBA (colour type 6), not interlaced."""
+    if Image is not None:
+        img = Image.open(path).convert("RGBA")
+        return img.size[0], img.size[1], list(img.getdata())
+    d = open(path, "rb").read()
+    if d[:8] != b"\x89PNG\r\n\x1a\n":
+        sys.exit(f"{path}: not a PNG")
+    pos, idat, w = 8, b"", 0
+    while pos < len(d):
+        n, kind = struct.unpack(">I4s", d[pos:pos + 8])
+        body = d[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype, _, _, inter = struct.unpack(">IIBBBBB", body)
+            if (depth, ctype, inter) != (8, 6, 0):
+                sys.exit(f"{path}: depth {depth} colour type {ctype} interlace {inter} - install Pillow for this one")
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * 4, [], bytearray(w * 4)
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - 4] if i >= 4 else 0
+            b, c = prev[i], prev[i - 4] if i >= 4 else 0
+            if f == 1: line[i] = (line[i] + a) & 255
+            elif f == 2: line[i] = (line[i] + b) & 255
+            elif f == 3: line[i] = (line[i] + ((a + b) >> 1)) & 255
+            elif f == 4:
+                p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line); prev = line
+    return w, h, [tuple(r[i:i + 4]) for r in rows for i in range(0, stride, 4)]
 
 
 def cname(fn):
@@ -30,11 +69,9 @@ def main():
     decls, defs, table = [], [], []
     total = 0
     for fn in files:
-        img = Image.open(os.path.join(SRC, fn)).convert("RGBA")
-        w, h = img.size
+        w, h, px = read_rgba(os.path.join(SRC, fn))
         if w > 64 or h > 64:
             sys.exit(f"{fn}: {w}x{h} is too big for a UI icon (max 64)")
-        px = list(img.getdata())
         rgb, alp = [], []
         for r, g, b, a in px:
             rgb.append(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))
