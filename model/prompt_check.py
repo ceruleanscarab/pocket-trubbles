@@ -122,6 +122,13 @@ TRUBBLES_CASES = [   # (case, pins, goal, test, threshold)
 ]
 
 
+def warm_up(args, st):
+    # one untimed-ish call first: a cold gemma4:26b load took 735 s on the
+    # WSL box (2026-10-09), and every 30 s panel call during it counted as a failure
+    print("warming up the teacher ...", flush=True)
+    gt.ask_ollama(args.host, args.model, st, 1800)
+
+
 def trubbles_main(args):
     gt.SCHEMA = "trubbles"
     if args.prompt_file:
@@ -134,6 +141,7 @@ def trubbles_main(args):
     pins["content"] = dict(content=8, hunger=1, stress=0, bored=1)
     for case, pin in pins.items():
         P += [(case, trubbles_state(rng, **pin)) for _ in range(args.n // 2)]
+    warm_up(args, P[0][1])
     print(f"{len(P)} calls to {args.model} @ {args.host} ({args.workers} workers) ...", flush=True)
 
     def ask(item):
@@ -191,6 +199,7 @@ def main():
         gt.SYSTEM_PROMPT_V4 = txt
     rng = random.Random(args.seed)
     P = panel(rng, args.schema, args.n)
+    warm_up(args, P[0][1])
     print(f"{len(P)} calls to {args.model} @ {args.host} ({args.workers} workers) ...", flush=True)
 
     def ask(item):
