@@ -42,11 +42,8 @@ OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(filter-out ../common/%,$(APP_SRCS)) $
 $(OUT): $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
 
-# (Trubbles, 2026-10-08: --selftest-llm is out until a Trubbles model is
-# trained - the fish model knows none of the Trubbles goals, and
-# advisor_core_init refuses it by design)
 SELFTESTS := --selftest --selftest-hunger --selftest-goals --selftest-shop --selftest-battery \
-             --selftest-pop --selftest-card --selftest-sleep --selftest-tend \
+             --selftest-pop --selftest-card --selftest-sleep --selftest-tend --selftest-llm \
              --selftest-saves --selftest-update
 # the dev repo does not track model/out (the public one does): NOMODEL=1 runs
 # the same checks without the LLM selftest, for a checkout with no model
