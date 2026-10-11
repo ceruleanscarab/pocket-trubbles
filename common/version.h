@@ -31,9 +31,9 @@
  * update manifest naming another model tag says "needs the cable" until the
  * model path lands (docs/OTA.md, phase two). tools/model_trailer.py --check
  * refuses a release whose model file disagrees with these. */
-#define PT_MODEL_TAG     "v3m"
-#define PT_MODEL_LEN     7557640u
-#define PT_MODEL_SHA256  "50bed3e16a6b11f3496dde21d8784da9067f40ec9f0a77cf97f60a95acb80f6b"
+#define PT_MODEL_TAG     "trubbles1"
+#define PT_MODEL_LEN     7558660u
+#define PT_MODEL_SHA256  "9223d0093b91012f0a573113a36682008c48b86d475b8eb2a829ffe7f39bbf1c"
 
 /* the board this build is for (2026-10-02: 0.3.0 ships three - docs/BOARDS.md).
  * One source tree, one release number, but an image per board: a tank fetches
