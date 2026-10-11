@@ -19,10 +19,10 @@ import glob, os, sys, time, datetime
 import serial
 
 quiet = "--quiet" in sys.argv
-ports = sorted(glob.glob("/dev/cu.usbmodem*"))
+ports = sorted(glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/ttyACM*"))  # macOS; Linux / WSL
 port = os.environ.get("TANK_PORT") or (ports[0] if len(ports) == 1 else None)
 if not port:
-    sys.exit("preflight: no /dev/cu.usbmodem* - wake the tank (BOOT) and plug it in; refusing to continue" if not ports else
+    sys.exit("preflight: no /dev/cu.usbmodem* or /dev/ttyACM* - wake the tank (BOOT) and plug it in; refusing to continue" if not ports else
              "preflight: more than one board on USB (" + ", ".join(ports) + ") - say which is the tank: TANK_PORT=/dev/cu.usbmodemNNN")
 here = os.path.dirname(os.path.abspath(__file__))
 out_dir = os.path.join(here, "..", "docs", "batlog")
