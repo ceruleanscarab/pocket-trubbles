@@ -1,0 +1,50 @@
+// Pocket Trubbles for Android (prototype, 2026-10-12): the PC sim (sim/main.c,
+// LVGL + SDL2) built by the NDK around common/, in SDL2's Android activity.
+// android/fetch_sdl.sh first; sim/lvgl must be cloned as for the PC sim.
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.pockettrubbles.app'
+    compileSdkVersion 34
+    ndkVersion '27.2.12479018'
+    defaultConfig {
+        applicationId 'com.pockettrubbles.app'
+        minSdkVersion 28                          // Android 9: LVGL's SDL driver uses aligned_alloc (bionic API 28)
+        targetSdkVersion 34
+        versionCode 1
+        versionName '0.1-prototype'
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static'
+                abiFilters 'arm64-v8a', 'x86_64'      // phones; the emulator
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path 'jni/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+    sourceSets.main {
+        java.srcDirs += ['../third_party/SDL2/android-project/app/src/main/java']
+        assets.srcDirs += ["$buildDir/generated/trubbles_assets"]
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    lint {
+        abortOnError false
+    }
+}
+
+// The game's data files, straight from the repo (nothing duplicated in git):
+// android_port.c copies them out of the APK on first launch.
+tasks.register('trubblesAssets', Copy) {
+    from('../../assets/sounds') { include 'sounds.bin' }
+    from('../../model/out') { include 'model_q4.bin', 'tokenizer.bin' }
+    into "$buildDir/generated/trubbles_assets"
+}
+preBuild.dependsOn trubblesAssets
