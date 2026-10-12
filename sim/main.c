@@ -48,6 +48,7 @@
 #define _DEFAULT_SOURCE   /* glibc hides setenv / strdup / truncate under -std=c11; an undeclared
                              strdup returns a truncated int and --selftest-saves crashed in CI */
 #endif
+#include "theme.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -374,7 +375,7 @@ static int selftest_pop(void) {
         if (n != 5 || staged) { printf("FAIL: a new pod should list 5 bud gates, none staged (%d, %d)\n", n, staged); return 1; }
         int met = 0; for (int i = 0; i < n; i++) met += req[i].met;
         if (req[0].kind != FRY_REQ_TRUST || req[1].kind != FRY_REQ_FEED || req[2].kind != FRY_REQ_HOLD || req[3].kind != FRY_REQ_GLASS || req[4].kind != FRY_REQ_CONTENT
-            || met != 1 || !req[3].met || req[4].met || strcmp(req[4].progress, "NO FLUFF YET")) {
+            || met != 1 || !req[3].met || req[4].met || strcmp(req[4].progress, TH("NO FLUFF YET", "NO ELDER YET"))) {
             printf("FAIL: a fresh pod's gates: %d met, glass %d, content %d '%s'\n", met, req[3].met, req[4].met, req[4].progress); return 1; }
         printf("selftest-pop: bud checklist: %d gates (%s / %s / %s / %s / %s)\n", n, req[0].progress, req[1].progress, req[2].progress, req[3].progress, req[4].progress);
         tank.player_feedings = 12; progression_next_fry(&tank, req, &staged);

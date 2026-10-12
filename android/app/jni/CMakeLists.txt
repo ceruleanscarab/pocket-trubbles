@@ -36,6 +36,7 @@ target_include_directories(main PRIVATE
     ${REPO}/sim ${REPO}/common ${REPO}/common/llm)
 target_compile_definitions(main PRIVATE
     LV_CONF_INCLUDE_SIMPLE
+    THEME_CTHULHU                                  # the Android app is the Cthulhu theme (2026-10-12); the device and sim stay Trubbles
     SOUNDS_BIN="../assets/sounds/sounds.bin"      # relative to the sim/ dir android_port.c makes the cwd
     PT_VERSION="android")
 target_compile_options(main PRIVATE -O2 -std=gnu11 -Wno-unused-parameter -Wno-unused-result)

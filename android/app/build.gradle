@@ -8,7 +8,7 @@ android {
     compileSdkVersion 34
     ndkVersion '27.2.12479018'
     defaultConfig {
-        applicationId 'com.pockettrubbles.app'
+        applicationId 'com.pocketcthulhu.app'           // the Cthulhu theme (2026-10-12): its own app beside a Trubbles one
         minSdkVersion 28                          // Android 9: LVGL's SDL driver uses aligned_alloc (bionic API 28)
         targetSdkVersion 34
         versionCode 1

@@ -1,4 +1,5 @@
 /* setup.c — first-run setup flow (see setup.h). */
+#include "theme.h"
 #include "setup.h"
 #include "tank_events.h"
 #include "render.h"
@@ -567,16 +568,16 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + 36, 3, C_TEXT, "WELCOME");
         static const char *const ls[] = {
-            "TWO PIPS HAVE MOVED IN.",
+            TH("TWO PIPS HAVE MOVED IN.", "TWO LARVAE HAVE STIRRED."),
             "THEY EAT, PLAY, REST AND",
             "GROW UP WHILE YOU WATCH.",
             "EACH ONE THINKS FOR ITSELF.",
             "FIRST, LET'S MEET THEM.",
         };
         static const char *const solo[] = {        /* the keeper's own words for it (2026-10-08) */
-            "YOU FIND A LONE TRUBBLE",
-            "IN THE CARGO BAY.",
-            "IT EATS, ROLLS AND NAPS,",
+            TH("YOU FIND A LONE TRUBBLE", "YOU FIND A LONE SPAWN"),
+            TH("IN THE CARGO BAY.", "IN SUNKEN R'LYEH."),
+            TH("IT EATS, ROLLS AND NAPS,", "IT EATS, CREEPS, DREAMS,"),
             "AND THINKS FOR ITSELF.",
             "FIRST, LET'S MEET IT.",
         };
@@ -585,7 +586,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else if (s_page == SETUP_PG_BUBBLES) {
         /* the live tank with a stripe down the column: drag it anywhere */
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, "PLACE THE AIR VENT");
+        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, TH("PLACE THE AIR VENT", "PLACE THE BUBBLE VENT"));
         nav(fb, stride, true, "NEXT", false);
         int bx = (int)t->bubble_x - PAGE_X;
         render_rect_blend(fb, stride, bx - 22, SETUP_TOP_BTN_Y + SETUP_BTN_H + 10, 44, FLOOR - (SETUP_TOP_BTN_Y + SETUP_BTN_H + 10), C_EDGE, 46);
@@ -607,9 +608,9 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         /* the DEPTH bar: one outlined box, three joined segments, the chosen
            one lit; a picture tile on each and the word under it */
         static const char *const zl[DECOR_Z_N] = { "BEHIND", "AMONG", "IN FRONT" };
-        static const char *const hint[DECOR_Z_N] = { "TRUBBLES PASS IN FRONT OF IT", "TRUBBLES PASS THROUGH IT", "TRUBBLES PASS BEHIND IT" };
+        static const char *const hint[DECOR_Z_N] = { TH("TRUBBLES PASS IN FRONT OF IT", "SPAWN PASS IN FRONT OF IT"), TH("TRUBBLES PASS THROUGH IT", "SPAWN PASS THROUGH IT"), TH("TRUBBLES PASS BEHIND IT", "SPAWN PASS BEHIND IT") };
         static const char *const castle_hint[DECOR_Z_N] = { "THE PLANTS GROW IN FRONT OF IT", "", "IT STANDS IN FRONT OF THE PLANTS" };
-        static const char *const coral_hint[DECOR_Z_N] = { "BEHIND THE MOSS AND TRUBBLES", "", "IN FRONT OF EVERYTHING" };
+        static const char *const coral_hint[DECOR_Z_N] = { TH("BEHIND THE MOSS AND TRUBBLES", "BEHIND THE KELP AND SPAWN"), "", "IN FRONT OF EVERYTHING" };
         int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);
         int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (PAGE_W - bw) / 2;   /* the item's own depths */
         text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "DEPTH");
@@ -674,7 +675,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR TRUBBLE" : s_birth ? "NAME THE NEW PIP" : s_solo ? "NAME YOUR TRUBBLE" : page_fish() == 0 ? "NAME THE FIRST TRUBBLE" : "NAME THE SECOND TRUBBLE");
+        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? TH("RENAME YOUR TRUBBLE", "RENAME YOUR SPAWN") : s_birth ? TH("NAME THE NEW PIP", "NAME THE NEW LARVA") : s_solo ? TH("NAME YOUR TRUBBLE", "NAME YOUR SPAWN") : page_fish() == 0 ? TH("NAME THE FIRST TRUBBLE", "NAME THE FIRST SPAWN") : TH("NAME THE SECOND TRUBBLE", "NAME THE SECOND SPAWN"));
         if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
         const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
         int n = name_len(f);
@@ -711,7 +712,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
         render_rect_blend(fb, stride, -PAGE_X, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR TRUBBLE" : s_birth ? "NAME THE NEW PIP" : s_solo ? "NAME YOUR TRUBBLE" : page_fish() == 0 ? "NAME THE FIRST TRUBBLE" : "NAME THE SECOND TRUBBLE");
+        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? TH("RENAME YOUR TRUBBLE", "RENAME YOUR SPAWN") : s_birth ? TH("NAME THE NEW PIP", "NAME THE NEW LARVA") : s_solo ? TH("NAME YOUR TRUBBLE", "NAME YOUR SPAWN") : page_fish() == 0 ? TH("NAME THE FIRST TRUBBLE", "NAME THE FIRST SPAWN") : TH("NAME THE SECOND TRUBBLE", "NAME THE SECOND SPAWN"));
         nav(fb, stride, true, s_rename ? "DONE" : "NEXT", s_rename);
         int n = name_len(f);
         if (s_slot > n) s_slot = n;
@@ -764,13 +765,13 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         fish_ring(fb, stride, f, r, f->color);
         fish_ring(fb, stride, f, r + 8, C_EDGE);
         render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, 116, C_PANEL, 150);
-        text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW PIP!");
+        text_c(fb, stride, CX, 104, 3, C_TEXT, TH("A NEW PIP!", "A NEW LARVA!"));
         char l1[FISH_NAME_MAX * 2 + 24];
         bool bud = f->parent_a >= 0 && f->parent_a == f->parent_b;   /* (Trubbles: one parent) */
         if (bud) snprintf(l1, sizeof l1, "BUDDED FROM %s", fish_name(t, f->parent_a));
         else snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
         text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
-        text_c(fb, stride, CX, 162, 2, C_CAPT, bud ? "RIGHT BESIDE IT." : "DOWN IN THE MOSS.");
+        text_c(fb, stride, CX, 162, 2, C_CAPT, bud ? "RIGHT BESIDE IT." : TH("DOWN IN THE MOSS.", "DOWN IN THE KELP."));
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
         dots(fb, stride, PAGE_H - 14);
@@ -828,8 +829,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             "TAP THE TOP TO DROP FOOD",
             "HOLD A FINGER AND THEY VISIT",
             "TAP ONE TO CHECK ON IT",
-            "DRAG THE GLASS TO WIPE GRIME",
-            "SWIPE ACROSS MOSS TO TRIM",
+            TH("DRAG THE GLASS TO WIPE GRIME", "DRAG THE GLASS TO WIPE SLIME"),
+            TH("SWIPE ACROSS MOSS TO TRIM", "SWIPE ACROSS KELP TO TRIM"),
             "TWO TAPS FLIP THE LIGHT",
             "THEY CHOOSE. YOU CARE.",
         };
@@ -837,8 +838,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             "TAP THE TOP TO DROP FOOD",
             "HOLD A FINGER AND IT VISITS",
             "TAP IT TO CHECK ON IT",
-            "DRAG THE GLASS TO WIPE GRIME",
-            "SWIPE ACROSS MOSS TO TRIM",
+            TH("DRAG THE GLASS TO WIPE GRIME", "DRAG THE GLASS TO WIPE SLIME"),
+            TH("SWIPE ACROSS MOSS TO TRIM", "SWIPE ACROSS KELP TO TRIM"),
             "TWO TAPS FLIP THE LIGHT",
             "IT CHOOSES. YOU CARE.",
         };

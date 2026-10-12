@@ -29,6 +29,13 @@ BUILD   := build
 OUT     := fishsim
 ROUNDF  :=
 endif
+# `make CTHULHU=1`: the Android app's Cthulhu theme (THEME_CTHULHU, android/), to
+# preview on the PC as ./fishsim-cthulhu in build-cthulhu/ - not a board's build
+ifdef CTHULHU
+BUILD   := $(BUILD)-cthulhu
+OUT     := $(OUT)-cthulhu
+ROUNDF  += -DTHEME_CTHULHU
+endif
 
 CFLAGS  := $(ROUNDF) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
            -Wall -Wextra -Wno-unused-parameter -MMD -MP

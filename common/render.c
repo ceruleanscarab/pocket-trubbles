@@ -4,6 +4,7 @@
  * motes, the fuzz moss the keeper trims and the grime the keeper wipes off
  * the glass. Everything is drawn into a bare RGB565 buffer; night dims the
  * palette. */
+#include "theme.h"
 #include "render.h"
 #include "icons.h"
 #include "progression.h"
@@ -227,9 +228,131 @@ static uint32_t trub_mood(uint32_t c, const fish_t *f, bool asleep, float *flat,
 static uint32_t trub_fur(const fish_t *f, bool asleep, float *flat, float *drowsy) {
     return trub_mood(f->color, f, asleep, flat, drowsy);
 }
+#ifdef THEME_CTHULHU
+/* ---- the Cthulhu theme (2026-10-12, the Android build's THEME_CTHULHU): the
+ * same creature, its body the same size, mood and motion, drawn as a little
+ * Cthulhu - a round octopus head over two small feet, a beard of face
+ * tentacles that sway and curl up when it is scared or hiding, bat wings that
+ * flap in a hop and fold in sleep, and slit-pupilled eyes. Its own tint leans
+ * green; the keeper's markings are spots on the head. */
+static void draw_cthulhu_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float hush, float glow, bool unborn) {
+    float R = TRUB_R * f->size, flat, drowsy;
+    uint32_t skin = trub_mood(mix(f->color, 0x5e9e6e, 0.6f), f, asleep, &flat, &drowsy);
+    if (hush > flat) flat = hush;
+    if (glow > 0) skin = mix(skin, 0xb8ff9a, 0.55f * glow);           /* the bud's tell: an eldritch glow */
+    uint32_t skin_dark = mix(skin, 0x000000, 0.38f), skin_lite = mix(skin, 0xffffff, 0.30f);
+    bool air = f->perch == PERCH_AIR;
+    float breathe = air ? 0 : sinf(clock * (asleep ? 1.4f : 2.2f) + f->wander) * 0.025f;
+    float stretch = air ? fminf(fabsf(f->vy) / 900.0f, 0.18f) : 0;
+    float sy = (1 + breathe + stretch) * (1 - 0.28f * f->squash) * (1 - 0.22f * flat);
+    float sx = (1 - breathe * 0.5f - stretch * 0.6f) * (1 + 0.22f * f->squash) * (1 + 0.14f * flat);
+    float rx = R * sx, ry = R * sy * 0.92f;                              /* the head, a little squat */
+    float bot = f->y + R, cx = f->x, cy = bot - 0.30f * R - ry;          /* up on its tentacles and feet */
+    float face = f->yaw;
+
+    /* wings: two bat wings behind the head - spread and beating in a hop, a
+       slow twitch at rest, folded small asleep or pressed down when scared */
+    if (!unborn) {
+        float beat = air ? sinf(clock * 22) * 0.35f : sinf(clock * 1.3f + f->wander) * 0.06f;
+        float open = asleep ? 0.45f : (1 - 0.6f * flat);
+        uint32_t wing = mix(skin_dark, 0x000000, 0.25f);
+        for (int k = 0; k < 2; k++) {
+            float side = k ? 1.0f : -1.0f;
+            float bx = cx + side * 0.70f * rx, by = cy - 0.05f * ry;       /* the shoulder, behind the head's side */
+            float span = R * (0.55f + 0.30f * open), lift = 0.55f + beat;
+            /* a bat wing, fanned from the shoulder: up and out to the tip,
+               then three scallops of the trailing edge back to the body */
+            /* points 2, 4, 6 are the scallops' tips; 3 and 5 the notches between */
+            static const float WX[7] = { 0, 1.00f, 0.98f, 0.74f, 0.58f, 0.34f, 0.14f };
+            static const float WY[7] = { 0, -1.00f, -0.05f, -0.42f, 0.10f, -0.22f, 0.24f };
+            float xs[7], ys[7];
+            for (int i = 0; i < 7; i++) { xs[i] = bx + side * WX[i] * span * open; ys[i] = by + WY[i] * span * (i == 1 ? lift / 0.55f : 1) * 0.9f; }
+            for (int i = 1; i < 6; i++) {
+                float tx3[3] = { xs[0], xs[i], xs[i + 1] }, ty3[3] = { ys[0], ys[i], ys[i + 1] };
+                fill_poly(c, tx3, ty3, 3, wing);
+            }
+            /* the finger bones from the shoulder to the scallops' points */
+            for (int i = 1; i <= 4; i += (i == 1 ? 1 : 2))
+                for (int s = 1; s <= 8; s++) { float p = s / 8.0f; px_blend(c, (int)(xs[0] + (xs[i] - xs[0]) * p), (int)(ys[0] + (ys[i] - ys[0]) * p), skin_dark, 170); }
+        }
+    }
+    /* feet: as the Trubble's, under the tentacles */
+    uint32_t foot = mix(skin, 0x1a2418, 0.65f);
+    for (int k = 0; k < 2; k++) {
+        float side = k ? 1.0f : -1.0f;
+        float lift = air ? 0.12f * R
+                   : fabsf(f->vx) > 5 ? fmaxf(0, sinf(f->roll * 1.6f + k * 3.14159f)) * 0.16f * R : 0;
+        fill_ellipse(c, cx + side * 0.36f * rx + face * 0.12f * R, bot - 0.15f * R - lift, 0.26f * R, 0.15f * R, foot, 255);
+    }
+    /* the head */
+    fill_ellipse(c, cx, cy, rx, ry, skin, 255);
+    /* markings: the keeper's accent as spots on the crown, coming in with growth */
+    if (f->stage >= STAGE_JUV && !unborn) {
+        float fl, dr;
+        uint32_t mk = mix(trub_mood(f->accent, f, asleep, &fl, &dr), f->accent, 0.5f);
+        int n = f->stage == STAGE_JUV ? 2 : 3;
+        float sz = f->stage == STAGE_JUV ? 0.13f : 0.17f;
+        for (int k = 0; k < n; k++) {
+            float a = -2.5f + k * 0.9f + trub_hash(k, f->preset + 3) * 0.4f;   /* across the top of the head */
+            float d = 0.55f + 0.15f * trub_hash(k, f->preset + 11);
+            float r = R * sz * (0.8f + 0.4f * trub_hash(k, f->preset + 19));
+            fill_ellipse(c, cx + cosf(a) * rx * d, cy + sinf(a) * ry * d, r * sx, r * sy, mk, 255);
+        }
+    }
+    fill_ellipse(c, cx - 0.25f * rx, cy - 0.35f * ry, rx * 0.45f, ry * 0.35f, skin_lite, 80);   /* a wet sheen */
+    /* the face tentacles: a beard of five, from under the eyes down past the
+       chin, swaying; scared or hiding they curl up short; asleep they hang still */
+    {
+        const int NT = 5, SEG = 7;
+        float sway_amp = asleep ? 0.0f : (1 - flat) * 0.12f * R;
+        float len = R * (0.80f - 0.40f * flat);
+        uint32_t tc = mix(skin, skin_dark, 0.60f), tip = mix(skin, skin_lite, 0.3f);
+        for (int k = 0; k < NT; k++) {
+            float u = (k - (NT - 1) / 2.0f) / ((NT - 1) / 2.0f);            /* -1 .. 1 across the face */
+            float x0 = cx + face * 0.18f * rx + u * 0.40f * rx, y0 = cy + 0.42f * ry + (1 - u * u) * 0.10f * ry;
+            float r0 = R * (0.14f - 0.03f * fabsf(u));
+            for (int s = 0; s < SEG; s++) {
+                float p = (s + 1.0f) / SEG;
+                float curl = flat * p * p * 0.9f;                            /* curled toward the face */
+                float x = x0 + u * p * 0.10f * R + sinf(clock * 2.4f + k * 1.3f + p * 3.0f + f->wander) * sway_amp * p
+                        - u * curl * 0.35f * R;
+                float y = y0 + p * len - curl * 0.45f * R;
+                float r = r0 * (1 - 0.65f * p);
+                fill_ellipse(c, x, y, r + 0.4f, r + 0.4f, s == SEG - 1 ? tip : tc, 255);
+            }
+        }
+    }
+    /* eyes: big, set toward the way it faces, above the tentacles; a pale
+       yellow-green with slit pupils; shut to a lid line asleep */
+    float ey = cy - 0.05f * ry, ex = face * 0.20f * rx, gap = 0.32f * rx * (0.75f + 0.25f * fabsf(face));
+    for (int k = 0; k < 2; k++) {
+        float x = cx + ex + (k ? gap : -gap) * (1 - 0.15f * fabsf(face));
+        if (asleep || unborn) { fill_ellipse(c, x, ey + 0.05f * R, 0.18f * R, 0.05f * R, 0x10180f, 230); continue; }
+        float baby = clamp01((1.0f - f->size) / 0.5f);
+        float er = 0.22f * R * (1 + 0.12f * flat) * (1 + 0.6f * baby);
+        fill_ellipse(c, x, ey, er, er * 1.10f, 0xe8f2a8, 255);
+        float pw = er * (0.30f - 0.10f * flat), ph = er * (0.85f - 0.20f * flat);   /* fear narrows the slit */
+        float px_ = x + face * er * 0.28f;
+        fill_ellipse(c, px_, ey, pw < 1 ? 1 : pw, ph, 0x0c100a, 255);
+        if (er > 3) px_blend(c, (int)(px_ - er * 0.35f), (int)(ey - er * 0.45f), 0xffffff, 220);
+        if (drowsy > 0.4f) {
+            float lid = er * 1.10f * (0.3f + 0.7f * (drowsy - 0.4f) / 0.6f);
+            float ly0 = ey - er * 1.10f;
+            for (int yy = (int)ly0; yy <= (int)(ly0 + lid); yy++) {
+                float w = er * ell_half((yy - ey) / (er * 1.10f));
+                if (w > 0) fill_ellipse(c, x, yy + 0.5f, w + 0.5f, 0.6f, skin, 255);
+            }
+        }
+    }
+}
+#endif
+
 /* hush: fur pressed flat (hiding); glow: 0..1 warm light (the bud's tell);
    unborn: a bud's lump - eyes shut, fur undimmed */
 static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float hush, float glow, bool unborn) {
+#ifdef THEME_CTHULHU
+    draw_cthulhu_core(c, f, clock, asleep, hush, glow, unborn); return;
+#endif
     float R = TRUB_R * f->size, flat, drowsy;
     uint32_t fur = trub_fur(f, asleep, &flat, &drowsy);
     if (hush > flat) flat = hush;                      /* tucked away: fur pressed flat */
@@ -442,7 +565,11 @@ static const char SHRIMP_KEYS[SHRIMP_TONES + 1] = "orhsealt";
  * them), nose down to a crumb (the peck), legs streaming back (the dart).
  * Tones: o underside, r body, h the back's light, s a glint, e the eye,
  * a feelers, l legs, t (unused) */
+#ifdef THEME_CTHULHU                                       /* PALE ISOPODS: bleached grey-lilac plates */
+static const uint32_t SHRIMP_RGB[SHRIMP_TONES]  = { 0x4e4858, 0xa9a2b4, 0xcfc9d8, 0xf4f0fa, 0x0a080e, 0xbdb6c8, 0x6e6878, 0xa9a2b4 };
+#else
 static const uint32_t SHRIMP_RGB[SHRIMP_TONES]  = { 0x5e3f24, 0xc49260, 0xe6bd88, 0xfff0d2, 0x120a06, 0xd9b892, 0x8a6a48, 0xc49260 };
+#endif
 static const uint8_t  SHRIMP_ALPHA[SHRIMP_TONES] = { 255, 255, 255, 255, 255, 150, 200, 255 };
 static const char *const SHRIMP_IDLE_A[8] = {
     "..................", ".......hhs......a.", ".....ohrrrhs...a..", "....orrrrrrrrea...",
@@ -590,6 +717,10 @@ static inline void span_final(ctx_t *c, int x0, int x1, int y, const src_t *s, i
 static inline uint32_t wall_rgb(int y) {
     float p = (float)y / TANK_BOT;                 /* top of the pod to the deck; under a bowl's deck line it holds */
     if (p > 1) p = 1;
+#ifdef THEME_CTHULHU                               /* sunken R'lyeh: deep water, green-black, darker with depth */
+    return p < 0.45f ? mix(0x15342f, 0x0c2423, p / 0.45f)
+                     : mix(0x0c2423, 0x040d0e, (p - 0.45f) / 0.55f);
+#endif
     return p < 0.45f ? mix(0x1f2a35, 0x161e28, p / 0.45f)
                      : mix(0x161e28, 0x0a0f16, (p - 0.45f) / 0.55f);
 }
@@ -607,7 +738,11 @@ static float    g_veg_row_dim = -1;
 static void veg_tint_fill(float dim) {
     /* the fuzz moss (Trubbles, 2026-10-08; it was seagrass): muted sage stalks
        and paler puffs at their tips; the sword plant's pair unchanged */
+#ifdef THEME_CTHULHU                                /* kelp: olive-brown stalks, golden float bladders */
+    static const uint32_t frond[6] = { 0x6f7a36, 0x5d6a2f, 0x55743a, 0x44602f, 0xc0a54c, 0xa58e40 };
+#else
     static const uint32_t frond[6] = { 0x6f9763, 0x5d8668, 0x4f9a52, 0x3e8546, 0xa9c98c, 0x93b98a };   /* moss, the tall fern, the moss's puffs */
+#endif
     if (g_veg_row_dim == dim) return;
     for (int y = 0; y < TANK_H; y++) {
         uint32_t w = wall_rgb(y);
@@ -767,9 +902,18 @@ enum { CT_LIGHT, CT_MID, CT_MIDDK, CT_DARK, CT_MORTAR, CT_MOSS_A, CT_MOSS_B,
  * slots - the wall tones an olive crate's, the mortar its panel seams, the
  * moss rust, the brick trim yellow-and-black hazard stripes round the
  * loading gap, the roof tones the orange crates stacked on top */
+#ifdef THEME_CTHULHU
+/* SUNKEN RUINS: the crates' slots in weathered green-grey stone - the panels
+ * are blocks, the rivets barnacles, the rust seaweed, the hazard stripes
+ * round the gap alternating voussoirs, the orange crates on top dark capstones */
+static const uint32_t CASTLE_RGB[CT_N] = {
+    0x93a08d, 0x6e7b69, 0x566252, 0x384236, 0x1b221a, 0x3e6b3a, 0x2c512d,
+    0x88947f, 0x5f6a5a, 0x3a4438, 0x76826c, 0x56624f, 0x36412f, 0x040807 };
+#else
 static const uint32_t CASTLE_RGB[CT_N] = {
     0xa7b07a, 0x7f8a55, 0x636d40, 0x434b2b, 0x272c19, 0x7a5532, 0x5c3e22,
     0xf2c33a, 0xd9a520, 0x26262a, 0xf3a25e, 0xe0803a, 0x9c5222, 0x07090c };
+#endif
 /* [keep | gate][tone][row], row 0 = CASTLE_FY - CASTLE_ROWS */
 static uint16_t g_castle_row[2][CT_N][CASTLE_ROWS + 12];
 static float    g_castle_dim = -1;
@@ -1297,10 +1441,17 @@ enum { SN_S0, SN_S1, SN_S2, SN_S3, SN_S4, SN_F0, SN_F1, SN_F2, SN_F3, SN_TIP, SN
  * same light from the upper left: S0..S4 its steel body, lit .. shadow; F0 /
  * F1 its yellow stripe, lit / not; F2 / F3 the brush; TIP its status light;
  * EYE the sensor lens */
+#ifdef THEME_CTHULHU                                       /* the GLASS SLUG: lilac-grey, a pale band, a glowing eye-stalk */
+static const uint32_t SNAIL_RGB[SN_NONE] = {
+    0xd9cde3, 0xae9fbb, 0x847494, 0x5a4b69, 0x2e2538,
+    0xf0e6c8, 0xc9bfa0, 0x4a3f52, 0x231c2a,
+    0x9dff7a, 0x0c0a10 };
+#else
 static const uint32_t SNAIL_RGB[SN_NONE] = {
     0xe7edf2, 0xb9c4cd, 0x8996a2, 0x5b6672, 0x2c333b,      /* the body: lit .. shadow */
     0xffcf6a, 0xe0a43a, 0x4a535d, 0x22282e,                /* the stripe; the brush */
     0x6dffb0, 0x0c1014 };                                  /* the status light; the lens */
+#endif
 #define SNAIL_SOLE_DY   6.0f                               /* the sole below snail_y (the sprite's centre) */
 #define SNAIL_TINT_FLOOR 0.84f
 #define SNAIL_TINT_GLASS 0.90f
@@ -1470,7 +1621,11 @@ enum { UR_T0, UR_T1, UR_T2, UR_T3, UR_T4, UR_T5, UR_NONE };
 /* (Trubbles, 2026-10-08) the urchin is a MOWING BOT: T0 the wheels and the
  * shadow, T1..T3 its orange body (shadow, body, lit), T4 steel (hubs, the
  * cutting comb), T5 the light and the comb's glint */
+#ifdef THEME_CTHULHU                                       /* the KELP CRAB: a deep red shell, pale claws */
+static const uint32_t URCHIN_RGB[UR_NONE] = { 0x150c0a, 0x8a2a1e, 0xb8432c, 0xe0735a, 0xd8c7a8, 0xfff2dc };
+#else
 static const uint32_t URCHIN_RGB[UR_NONE] = { 0x1b2026, 0xb4561a, 0xe5822a, 0xffb661, 0x8996a2, 0xfff0d3 };
+#endif
 #define UR_SPINES 11
 #define UR_FACE    5
 #define UR_RX     10.0f
@@ -1900,6 +2055,18 @@ static int g_scene_cl_x = -2, g_scene_cl_z = -1, g_scene_cl_q = -1, g_scene_cl_s
 static inline uint32_t floor_rgb(int x, int y) {
     int top = TANK_BOT - 16, d = y - top;
     uint32_t col;
+#ifdef THEME_CTHULHU                               /* the sea floor: silt, pebbles, a pale bone now and then */
+    {
+        uint32_t h = (uint32_t)(x * 73856093u) ^ (uint32_t)(y * 19349663u);
+        h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+        if (d <= 0) col = 0x4f5c48;
+        else if (h % 41 == 0) col = 0x6a7262;                       /* a pebble */
+        else if (h % 211 == 3) col = 0xb9b49c;                      /* a fleck of bone */
+        else col = (h & 3) ? 0x2c3527 : 0x252e21;                   /* silt */
+        float depth = (float)d / (TANK_H - top);
+        return mix(col, 0x040806, depth < 0 ? 0 : depth > 1 ? 0.6f : depth * 0.6f);
+    }
+#endif
     if (d <= 0) col = 0x6d7a86;                                     /* the lit edge */
     else if (d == 1) col = 0x4a5560;
     else if (x % 40 == 0) col = 0x141a20;                           /* a plate seam */
@@ -1924,7 +2091,72 @@ static void wall_px(uint16_t *buf, int stride, int x, int y, uint32_t rgb, float
 }
 #define WALL_VP_R 40
 static void wall_viewport(float *cx, float *cy) { *cx = TANK_W * 0.5f; *cy = TANK_BOT * 0.17f; }
+#ifdef THEME_CTHULHU
+/* R'lyeh's wall: cyclopean blocks whose joints meet at angles that are
+ * slightly wrong, a few elder signs carved faint, and a round opening onto a
+ * sickly green moon wavering through the water */
+static void draw_wall_detail_cthulhu(uint16_t *buf, int stride, float dim, bool vig) {
+    const int floor_top = TANK_BOT - 16;
+    /* the courses: two long joints across, each tilted its own wrong way */
+    const float cy0[2] = { TANK_BOT * 0.22f, TANK_BOT * 0.60f }, slope[2] = { 0.055f, -0.04f };
+    for (int k = 0; k < 2; k++)
+        for (int x = 0; x < TANK_W; x++) {
+            int y = (int)(cy0[k] + slope[k] * (x - TANK_W / 2));
+            wall_px(buf, stride, x, y, mix(wall_rgb(y), 0x020605, 0.65f), dim, vig);
+            wall_px(buf, stride, x, y + 1, mix(wall_rgb(y + 1), 0x3d5a4c, 0.30f), dim, vig);
+        }
+    /* the joints between blocks: leaning, and not parallel to each other */
+    const float jx[5] = { TANK_W * 0.14f, TANK_W * 0.37f, TANK_W * 0.58f, TANK_W * 0.80f, TANK_W * 0.95f };
+    const float lean[5] = { 0.10f, -0.07f, 0.13f, -0.05f, 0.08f };
+    for (int k = 0; k < 5; k++)
+        for (int y = 0; y < floor_top; y++) {
+            int band = y < cy0[0] ? 0 : y < cy0[1] ? 1 : 2;
+            if ((k + band) % 2) continue;                              /* staggered, as stones are laid */
+            int x = (int)(jx[k] + lean[k] * (y - floor_top / 2));
+            wall_px(buf, stride, x, y, mix(wall_rgb(y), 0x020605, 0.6f), dim, vig);
+            wall_px(buf, stride, x + 1, y, mix(wall_rgb(y), 0x3d5a4c, 0.25f), dim, vig);
+        }
+    /* elder signs, carved faint: a branch with five twigs */
+    const float gx[3] = { TANK_W * 0.10f, TANK_W * 0.86f, TANK_W * 0.47f }, gy[3] = { TANK_BOT * 0.40f, TANK_BOT * 0.33f, TANK_BOT * 0.75f };
+    for (int g = 0; g < 3; g++) {
+        uint32_t col = mix(wall_rgb((int)gy[g]), 0x4e7a62, 0.35f);
+        for (int s = -7; s <= 7; s++) wall_px(buf, stride, (int)gx[g], (int)gy[g] + s, col, dim, vig);   /* the stem */
+        for (int b = 0; b < 5; b++) {
+            float a = -2.6f + b * 0.55f;
+            for (int s = 2; s <= 6; s++)
+                wall_px(buf, stride, (int)(gx[g] + cosf(a) * s), (int)(gy[g] - 4 + sinf(a) * s), col, dim, vig);
+        }
+    }
+    /* the opening and the moon */
+    float vx, vy; wall_viewport(&vx, &vy);
+    const int R = WALL_VP_R, RO = WALL_VP_R + 5;
+    const float mx = vx + R * 0.22f, my = vy - R * 0.15f, mr = R * 0.42f;
+    for (int y = (int)vy - RO; y <= (int)vy + RO; y++)
+        for (int x = (int)vx - RO; x <= (int)vx + RO; x++) {
+            float dx = x - vx, dy = y - vy, d = sqrtf(dx * dx + dy * dy);
+            if (d > RO) continue;
+            uint32_t col;
+            if (d > R) {                                                 /* the stone ring, rough and lit from above */
+                uint32_t h = (uint32_t)(x * 2654435761u) ^ (uint32_t)(y * 40503u);
+                col = (dy < 0) ? 0x5a6d5e : 0x2d3b33;
+                if ((h >> 7) % 5 == 0) col = mix(col, 0x0a100c, 0.4f);
+            } else if (d > R - 1) col = 0x050a08;
+            else {
+                col = mix(0x0a2a26, 0x05161a, (dy + R) / (2.0f * R));        /* the water beyond */
+                float wob = sinf(y * 0.45f) * 1.4f;                            /* the moon wavers through it */
+                float mdx = x - mx + wob, mdy = y - my, md = sqrtf(mdx * mdx + mdy * mdy);
+                if (md < mr) col = mix(0xd6efa4, 0x9fc77c, md / mr * 0.8f);
+                else if (md < mr * 1.9f) col = mix(col, 0x7fae6a, 0.35f * (1 - (md - mr) / (mr * 0.9f)));   /* its halo */
+                if (((int)(y + sinf(x * 0.3f) * 2)) % 9 == 0 && md >= mr) col = mix(col, 0x4f8a6a, 0.25f);   /* faint ripples */
+            }
+            wall_px(buf, stride, x, y, col, dim, vig);
+        }
+}
+#endif
 static void draw_wall_detail(uint16_t *buf, int stride, float dim, bool vig) {
+#ifdef THEME_CTHULHU
+    draw_wall_detail_cthulhu(buf, stride, dim, vig); return;
+#endif
     const int seam_y[2] = { (int)(TANK_BOT * 0.20f), (int)(TANK_BOT * 0.62f) };
     const int seam_x[2] = { (int)(TANK_W * 0.25f), (int)(TANK_W * 0.75f) };
     for (int k = 0; k < 2; k++)
@@ -1967,6 +2199,33 @@ static void draw_wall_detail(uint16_t *buf, int stride, float dim, bool vig) {
 /* the pod's shelves (Trubbles, 2026-10-08): steel brackets with a lit top
  * lip and a shadowed underside, at tank_ledge's geometry; and the nook */
 static void draw_ledges(ctx_t *c) {
+#ifdef THEME_CTHULHU
+    {   /* R'lyeh: carved stone slabs, and an old giant clam for the sleeping nook */
+    for (int i = 0; i < N_LEDGES; i++) {
+        float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
+        float xs[4] = { x0, x1, x1 - 4, x0 + 7 }, ys[4] = { top, top + 1, top + 13, top + 12 };   /* not quite square */
+        fill_poly(c, xs, ys, 4, 0x3b4b40);
+        float ls[4] = { x0, x1, x1, x0 }, ly[4] = { top, top + 1, top + 4, top + 3 };
+        fill_poly(c, ls, ly, 4, 0x6a7d6b);
+        for (float x = x0 + 9; x < x1 - 8; x += 17) {                 /* carved notches along the face */
+            float nxs[3] = { x, x + 4, x + 2 }, nys[3] = { top + 6, top + 6, top + 10 };
+            fill_poly(c, nxs, nys, 3, 0x1c2620);
+        }
+        float ss[4] = { x0 + 7, x1 - 4, x1 - 7, x0 + 9 }, sy[4] = { top + 11, top + 12, top + 14, top + 14 };
+        fill_poly(c, ss, sy, 4, 0x141b16);
+    }
+    float nx, ny; tank_nook(&nx, &ny);
+    float base = FLOOR_Y + 2;
+    fill_ellipse(c, nx, base - 5, 30, 9, 0x5e4f63, 255);              /* the lower shell */
+    fill_ellipse(c, nx, base - 8, 24, 5, 0xc2b0c8, 255);              /* nacre */
+    fill_ellipse(c, nx, base - 8, 18, 3, 0xe3d6e6, 200);
+    for (int i = 0; i < 9; i++) {                                     /* the ribs along its lip */
+        float x = nx - 26 + i * 6.5f;
+        fill_ellipse(c, x, base - 3, 2, 3, 0x43374a, 220);
+    }
+    return;
+    }
+#endif
     for (int i = 0; i < N_LEDGES; i++) {
         float x0, x1, top; tank_ledge(i, &x0, &x1, &top);
         float xs[4] = { x0, x1, x1 - 6, x0 + 6 }, ys[4] = { top, top, top + 12, top + 12 };
@@ -2557,8 +2816,8 @@ static void snail_card_draw(ctx_t *c, const tank_t *t) {
     rect_edge(c, X, Y, W, H, 0x9fd8e2); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
     const icon_t *ic = &icon_snail_upright;
     blit_icon_scaled(c, X + (W - ic->w * 2) / 2, Y + 10, ic, 2, true);
-    draw_text(c, X + (W - text_w("CLEANING BOT", 3)) / 2, Y + 82, 3, 0xffffff, "CLEANING BOT");
-    const char *cap = "GRIME SCRUBBED SO FAR";
+    draw_text(c, X + (W - text_w(TH("CLEANING BOT", "GLASS SLUG"), 3)) / 2, Y + 82, 3, 0xffffff, TH("CLEANING BOT", "GLASS SLUG"));
+    const char *cap = TH("GRIME SCRUBBED SO FAR", "SLIME SCRUBBED SO FAR");
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 112, 2, 0x9fd8e2, cap);
     char n[24];
     if (t->snail_grazed <= 0) snprintf(n, sizeof n, "NOTHING YET");
@@ -2584,8 +2843,8 @@ static void urchin_card_draw(ctx_t *c, const tank_t *t) {
             src_t sc = src_color(URCHIN_RGB[tone], 1.0f);
             for (int yy = 0; yy < S; yy++) span(c, ox + lx * S, ox + lx * S + S - 1, oy + ly * S + yy, &sc, 255);
         }
-    draw_text(c, X + (W - text_w("MOWING BOT", 3)) / 2, Y + 90, 3, 0xffffff, "MOWING BOT");
-    const char *cap = "MOSS MOWN SO FAR";
+    draw_text(c, X + (W - text_w(TH("MOWING BOT", "KELP CRAB"), 3)) / 2, Y + 90, 3, 0xffffff, TH("MOWING BOT", "KELP CRAB"));
+    const char *cap = TH("MOSS MOWN SO FAR", "KELP MOWN SO FAR");
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 118, 2, 0x9fd8e2, cap);
     char n[24]; int cm = (int)(t->urchin_grazed_px / PX_PER_CM);
     if (cm < 1) snprintf(n, sizeof n, "NOTHING YET");
@@ -2593,7 +2852,7 @@ static void urchin_card_draw(ctx_t *c, const tank_t *t) {
     else snprintf(n, sizeof n, "%d.%dK CM", cm / 1000, cm % 1000 / 100);   /* 1.0K CM and up: the line never outgrows the card (0.3.2) */
     draw_text(c, X + (W - text_w(n, 3)) / 2, Y + 140, 3, 0xffffff, n);
     const char *now = tank_urchin_chewing(t) ? "MOWING"
-                    : t->urchin_frond >= 0 ? "OFF TO THE TALL MOSS"
+                    : t->urchin_frond >= 0 ? TH("OFF TO THE TALL MOSS", "OFF TO THE TALL KELP")
                     : "RESTING";
     draw_text(c, X + (W - text_w(now, 2)) / 2, Y + 170, 2, 0x9fd8e2, now);
 }
@@ -2625,11 +2884,11 @@ static void shrimp_card_draw(ctx_t *c, const tank_t *t) {
             for (int yy = 0; yy < S; yy++) span(c, sx + x * S, sx + x * S + S - 1, sy + y * S + yy, &pal[ti], SHRIMP_ALPHA[ti]);
         }
     char line[32];
-    snprintf(line, sizeof line, "%d MITES", n);
+    snprintf(line, sizeof line, TH("%d MITES", "%d ISOPODS"), n);
     draw_text(c, X + (W - text_w(line, 3)) / 2, Y + 46, 3, 0xffffff, line);
     snprintf(line, sizeof line, "%d PELLET%s EATEN", (int)t->shrimp_eaten, t->shrimp_eaten == 1 ? "" : "S");
     draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 76, 2, 0x9fd8e2, line);
-    const char *cap = "NEXT MITE";
+    const char *cap = TH("NEXT MITE", "NEXT ISOPOD");
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 104, 2, 0x9fd8e2, cap);
     bool full = n >= SHRIMP_MAX;
     int have = full ? SHRIMP_PER_JOIN : t->shrimp_food;
@@ -2642,7 +2901,7 @@ static void shrimp_card_draw(ctx_t *c, const tank_t *t) {
         } else ring(c, x, py, 6, 0x5a6a6e);
     }
     if (full) snprintf(line, sizeof line, "THE COLONY IS FULL");
-    else if (tank_shrimp_refusing(t)) snprintf(line, sizeof line, "TOO MUCH GRIME TO EAT");
+    else if (tank_shrimp_refusing(t)) snprintf(line, sizeof line, TH("TOO MUCH GRIME TO EAT", "TOO MUCH SLIME TO EAT"));
     else if (t->shrimp_food >= SHRIMP_PER_JOIN && t->shrimp_cool > 0) {
         int m = (int)ceilf(t->shrimp_cool / 60.0f);
         snprintf(line, sizeof line, "ARRIVES IN %d MIN", m < 1 ? 1 : m);
@@ -2927,9 +3186,9 @@ void render_confirm_reset(uint16_t *fb, int stride, float frac) {
     const int X = RENDER_CONFIRM_X, Y = RENDER_CONFIRM_Y, W = RENDER_CONFIRM_W, H = RENDER_CONFIRM_H;
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, 0x9fd8e2); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    const char *title = "RESET POD?";
+    const char *title = TH("RESET POD?", "RESET R'LYEH?");
     draw_text(&c, X + (W - text_w(title, 3)) / 2, Y + 20, 3, 0xffffff, title);
-    const char *l1 = "START OVER WITH ONE PIP", *l2 = "EVERYTHING ELSE IS LOST";
+    const char *l1 = TH("START OVER WITH ONE PIP", "BEGIN AGAIN: ONE LARVA"), *l2 = "EVERYTHING ELSE IS LOST";
     draw_text(&c, X + (W - text_w(l1, 2)) / 2, Y + 58, 2, 0x9fd8e2, l1);
     draw_text(&c, X + (W - text_w(l2, 2)) / 2, Y + 78, 2, 0x9fd8e2, l2);
     /* NO is the calm one; YES wears the stress red */
@@ -3069,7 +3328,7 @@ static const badge_t *tank_badge(const tank_t *t, int k) {
     return &TANK_BADGES[0];
 }
 static int tank_pages(const tank_t *t) { return (tank_badge_n(t) + MSP_PER_ROW - 1) / MSP_PER_ROW; }
-static const char *const STAGE_WORDS[4] = { "PIP", "TUFT", "FLUFF", "OLD FLUFF" };
+static const char *const STAGE_WORDS[4] = { TH("PIP", "LARVA"), TH("TUFT", "YOUNG ONE"), TH("FLUFF", "ELDER"), TH("OLD FLUFF", "OLD ONE") };
 /* the detail modal (a tap on a badge / name / strip): what to show until
  * the next tap. caption[0] == 0 means no modal. */
 static char g_ms_caption[72], g_ms_title[16];
@@ -3270,7 +3529,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         int top = MSP_ROW_Y0 + t->n_fish * MSP_ROW_H;
         uint32_t fry_rgb = staged ? MSP_TEAL : MSP_DIM;
         render_fish_preview(fb, stride, MSP_FISH_X, top + MSP_ROW_MID, 0.55f, fry_rgb, fry_rgb, fry_rgb, t->clock);
-        draw_text(&c, 92, top + 2, 2, MSP_TEAL, "NEW PIP");
+        draw_text(&c, 92, top + 2, 2, MSP_TEAL, TH("NEW PIP", "NEW LARVA"));
         for (int k = 0; k < nreq; k++)           /* one tick per gate, lit when met */
             rect_fill(&c, 96 + k * 14, top + MSP_ROW_STRIP - 3, 10, 6, req[k].met ? MSP_TEAL : MSP_DIM);
         for (int k = 0; k < nreq; k++) {
@@ -3292,7 +3551,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         char bal[16]; snprintf(bal, sizeof bal, "%d", (int)t->sd_balance);
         draw_text(&c, MSP_SD_X + (MSP_ICON - text_w(bal, 2)) / 2, MSP_TANK_Y + 34, 2, 0xffffff, bal);
     }
-    draw_text(&c, 92, MSP_TANK_Y + 2, 2, MSP_TEAL, "POD");
+    draw_text(&c, 92, MSP_TANK_Y + 2, 2, MSP_TEAL, TH("POD", "R'LYEH"));
     for (int k = 0; k < POP_CAP; k++)        /* population strip: who is here, who could still arrive */
         fish_glyph(&c, 96 + k * 14, MSP_TANK_Y + 30, 2.8f, k < t->n_fish ? MSP_TEAL : MSP_DIM);
     int nb = tank_badge_n(t), np = tank_pages(t);
@@ -3355,7 +3614,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", STAGE_WORDS[f->stage & 3]);
             if (g_ms_sell_armed) snprintf(g_ms_sub, sizeof g_ms_sub, "TAP AGAIN TO SELL");
             else if (can) snprintf(g_ms_sub, sizeof g_ms_sub, "WORTH %d CREDITS", worth);
-            else if (g_ms_sell_asked) snprintf(g_ms_sub, sizeof g_ms_sub, t->n_fish <= FISH_KEEP_MIN ? "KEEP AT LEAST TWO FISH" : "NAME THE NEW PIP FIRST");
+            else if (g_ms_sell_asked) snprintf(g_ms_sub, sizeof g_ms_sub, t->n_fish <= FISH_KEEP_MIN ? TH("KEEP AT LEAST TWO FISH", "KEEP AT LEAST TWO SPAWN") : TH("NAME THE NEW PIP FIRST", "NAME THE NEW LARVA FIRST"));
             else g_ms_sub[0] = 0;                  /* (the line's room stays: the buttons never move) */
         }
         rect_fill(&c, X, Y, W, H, 0x04141a);
@@ -3478,12 +3737,12 @@ static int ms_open(const tank_t *t, int row, bool tank_row, bool fry_row, int k,
     if (fry_row) {
         if (k < 0) {                                 /* the name: the tally, and when it comes */
             int met = 0; for (int i = 0; i < nreq; i++) met += req[i].met;
-            snprintf(g_ms_title, sizeof g_ms_title, "NEW PIP");
-            if (staged) { snprintf(g_ms_caption, sizeof g_ms_caption, "EVERY STEP IS DONE. A PIP");   /* (Trubbles: budding) */
-                          snprintf(g_ms_caption2, sizeof g_ms_caption2, "WILL BUD SOON");
+            snprintf(g_ms_title, sizeof g_ms_title, TH("NEW PIP", "NEW LARVA"));
+            if (staged) { snprintf(g_ms_caption, sizeof g_ms_caption, TH("EVERY STEP IS DONE. A PIP", "EVERY STEP IS DONE. A LARVA"));   /* (Trubbles: budding) */
+                          snprintf(g_ms_caption2, sizeof g_ms_caption2, TH("WILL BUD SOON", "WILL SPAWN SOON"));
                           snprintf(g_ms_sub, sizeof g_ms_sub, "ON ITS WAY"); }
             else { snprintf(g_ms_caption, sizeof g_ms_caption, "WHEN ALL NEEDS ARE MET, A");     /* Strato's words, 2026-09-14 */
-                   snprintf(g_ms_caption2, sizeof g_ms_caption2, "NEW PIP IS READY TO BUD");
+                   snprintf(g_ms_caption2, sizeof g_ms_caption2, TH("NEW PIP IS READY TO BUD", "NEW LARVA READY TO SPAWN"));
                    snprintf(g_ms_sub, sizeof g_ms_sub, "%d OF %d DONE", met, nreq); }
             g_ms_lit = staged; g_ms_icon = NULL; g_ms_fish = -1; g_ms_fry = true;
         } else if (k < nreq) {                       /* a gate: the words, and where it stands */
@@ -3497,13 +3756,13 @@ static int ms_open(const tank_t *t, int row, bool tank_row, bool fry_row, int k,
         } else return MS_TAP_NONE;
     } else if (tank_row) {
         if (k < 0) {
-            snprintf(g_ms_title, sizeof g_ms_title, "POD");
-            snprintf(g_ms_caption, sizeof g_ms_caption, "%d OF %d TRUBBLES SO FAR", t->n_fish, POP_CAP);
+            snprintf(g_ms_title, sizeof g_ms_title, TH("POD", "R'LYEH"));
+            snprintf(g_ms_caption, sizeof g_ms_caption, TH("%d OF %d TRUBBLES SO FAR", "%d OF %d SPAWN SO FAR"), t->n_fish, POP_CAP);
             g_ms_lit = true; g_ms_icon = NULL; g_ms_fish = -1;
         } else {
             uint32_t bit = tank_badge(t, k)->bit; bool on = (t->tank_ms_bits & bit) != 0;
             g_ms_tpage = k / MSP_PER_ROW;            /* the arrows can cross pages: the row follows */
-            snprintf(g_ms_title, sizeof g_ms_title, on ? "POD" : "NOT YET");
+            snprintf(g_ms_title, sizeof g_ms_title, on ? TH("POD", "R'LYEH") : "NOT YET");
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", TMS_NAMES[bit_index(bit)]);
             g_ms_lit = on; g_ms_icon = tank_badge(t, k)->icon; g_ms_fish = -1;
         }
@@ -3567,7 +3826,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
     const int X = MSP_MODAL_X, W = MSP_MODAL_W, Y = MSP_MODAL_Y, H = MSP_MODAL_H;
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    char title[FISH_NAME_MAX + 16] = "THE POD", caption[40] = "";
+    char title[FISH_NAME_MAX + 16] = TH("THE POD", "R'LYEH"), caption[40] = "";
     const char *caption2 = NULL;                              /* a second line: the title and both move up */
     const icon_t *ic = NULL;
     const fish_t *f = fish >= 0 && fish < t->n_fish ? &t->fish[fish] : NULL;
@@ -3675,9 +3934,9 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
         if (owned) blit_icon(&c, 32, top, shop_icon(i), 255); else blit_icon_locked(&c, 32, top, shop_icon(i));   /* (the rows are where the bowl is wide: their own column) */
         draw_text(&c, 76, top + 2, 2, 0xffffff, it->name);
-        if (owned) draw_text(&c, 76, top + 20, 2, MSP_TEAL, "IN THE POD");
+        if (owned) draw_text(&c, 76, top + 20, 2, MSP_TEAL, TH("IN THE POD", "IN R'LYEH"));
         else price_tag(&c, 76, top + 20, it->price, can ? MSP_TEAL : MSP_DIM);
-        if (owned)     button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "IN POD", 2);
+        if (owned)     button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, TH("IN POD", "OWNED"), 2);
         else if (can) { button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                         draw_text(&c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
         else           button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
@@ -3710,14 +3969,14 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - 12 - MSP_HOW_H;
     if (owned && tank_decor_placeable(g_shp_modal)) {         /* a placeable piece: MOVE re-opens the placement page, SELL (twice) sells it back */
         char sell[24]; snprintf(sell, sizeof sell, "SELLS BACK FOR %d", progression_sell_value(g_shp_modal));
-        draw_text(&c, X + (W - text_w("IN THE POD", 2)) / 2, Y + 164, 2, MSP_TEAL, "IN THE POD");
+        draw_text(&c, X + (W - text_w(TH("IN THE POD", "IN R'LYEH"), 2)) / 2, Y + 164, 2, MSP_TEAL, TH("IN THE POD", "IN R'LYEH"));
         draw_text(&c, X + (W - text_w(sell, 2)) / 2, Y + 184, 2, MSP_DIM, sell);
         button(&c, SHP_TWO_X0, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "MOVE", 2);
         if (g_shp_sell_armed) { snprintf(sell, sizeof sell, "+%d OK?", progression_sell_value(g_shp_modal));
                                 button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, sell, 2);
                                 draw_text(&c, SHP_TWO_X1 + (MSP_HOW_W - text_w(sell, 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, sell); }
         else button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "SELL", 2);
-    } else if (owned) draw_text(&c, X + (W - text_w("IN THE POD", 2)) / 2, by + 8, 2, MSP_TEAL, "IN THE POD");   /* the snail: a permanent resident */
+    } else if (owned) draw_text(&c, X + (W - text_w(TH("IN THE POD", "IN R'LYEH"), 2)) / 2, by + 8, 2, MSP_TEAL, TH("IN THE POD", "IN R'LYEH"));   /* the snail: a permanent resident */
     else {
         char line[32]; snprintf(line, sizeof line, "%d", it->price);
         int pw = 20 + text_w(line, 2);
@@ -3851,7 +4110,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
-    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "TRUBBLES ARE QUIET AT NIGHT");
+    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, TH("TRUBBLES ARE QUIET AT NIGHT", "SPAWN ARE QUIET AT NIGHT"));
     /* LIGHTS OUT: < the choice > */
     {
         int ch = tank_light_choice(t), y = SET_SEG_Y(SET_ROW3_Y);
