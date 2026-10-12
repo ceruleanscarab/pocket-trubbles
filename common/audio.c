@@ -30,6 +30,7 @@ static const policy_t POLICY[SND_COUNT] = {
     [SND_WAKE]        = { 3, 1000 },
     [SND_LOW_BATTERY] = { 3, 5000 },
     [SND_ERROR]       = { 3, 1000 },
+    [SND_AMBIENT]     = { 2, 30000 },   /* tier 2: silent at night like the Trubbles themselves */
 };
 
 #define FADE_SAMPLES    (SND_RATE * 5 / 1000)     /* 5 ms */

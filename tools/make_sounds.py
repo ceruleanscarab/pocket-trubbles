@@ -54,6 +54,7 @@ CUES = [
     ("eat", 0), ("spook", 0), ("investigate", 0), ("bubbles", 0), ("beg", 0),
     ("welcome", 0), ("arrival", 0), ("milestone", 0), ("stage_up", 0),
     ("sleep", 0), ("wake", 0), ("low_battery", 0), ("error", 0),
+    ("ambient", 0),     # 2026-10-12: the pod's ambience, a few quiet one-shots (tank.c TEV_AMBIENT)
 ]
 CUE_IDS = [c for c, _ in CUES]
 LOOPS = {c for c, l in CUES if l}

@@ -18,7 +18,7 @@ const char *const GOAL_NAMES[GOAL_COUNT] = {
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
 const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
-    "welcome", "wheel_tick", "confirm",
+    "welcome", "wheel_tick", "confirm", "ambient",
 };
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
@@ -411,6 +411,7 @@ bool tank_remove_fish(tank_t *t, int idx) {
 
 void tank_init(tank_t *t, uint32_t seed) {
     t->rng = seed ? seed : 0xC0FFEE;
+    t->ambient_due = 0; t->ambient_rng = seed ^ 0xA3B1u;
     t->n_fish = 0;                 /* progression_boot restores or calls tank_new_population */
     for (int i = 0; i < MAX_FOOD; i++) t->food[i].alive = false;
     t->bubble_x = BUBBLE_X_DEFAULT; t->bubble_y = TANK_BOT * 0.5f;   /* matches gen_traces.py; setup may move x */
@@ -2306,6 +2307,18 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
              : !t->light_auto ? t->light_manual_off              /* MANUAL (default): the double-tap's state */
              : t->idle_s > (float)t->light_idle_s;                      /* AUTO: the idle rule */
     if (t->night != was_night) tank_emit(t->night ? TEV_LIGHT_OFF : TEV_LIGHT_ON, -1);
+    /* ambience (2026-10-12): every AMBIENT_MIN_S..MAX_S of lit, uncovered
+     * time, one quiet sound of the pod. The clock waits through the night and
+     * under a page; the mixer mutes the cue at night (tier 2) and at volume
+     * off, the device on a low battery. Its own LCG, not t->rng, so the tank's
+     * draws - every selftest and state dump - are as they were. */
+    if (!t->night && !t->ui_cover) {
+        if (t->ambient_due <= 0) {
+            t->ambient_rng = t->ambient_rng * 1664525u + 1013904223u;
+            t->ambient_due = AMBIENT_MIN_S + (AMBIENT_MAX_S - AMBIENT_MIN_S) * (float)(t->ambient_rng >> 16) / 65535.0f;
+        }
+        if ((t->ambient_due -= dt) <= 0) { tank_emit(TEV_AMBIENT, -1); t->ambient_due = 0; }
+    }
 
     touch_tick(t, dt);
 

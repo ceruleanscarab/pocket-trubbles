@@ -7,8 +7,8 @@
 #include <stdint.h>
 
 #define SND_RATE 16000
-#define SND_BANK_SAMPLES 265251u
-#define SND_BANK_BYTES 530502u
+#define SND_BANK_SAMPLES 497847u
+#define SND_BANK_BYTES 995694u
 
 enum {
     SND_TAP,
@@ -35,6 +35,7 @@ enum {
     SND_WAKE,
     SND_LOW_BATTERY,
     SND_ERROR,
+    SND_AMBIENT,
     SND_COUNT
 };
 
@@ -46,7 +47,7 @@ typedef struct {
     uint16_t gain_q8;         /* playback gain, 256 = 0 dB (gains.csv) */
 } snd_cue_t;
 
-#define SND_N_CLIPS 17
+#define SND_N_CLIPS 24
 extern const snd_clip_t SND_CLIPS[SND_N_CLIPS];
 extern const snd_cue_t  SND_CUES[SND_COUNT];
 

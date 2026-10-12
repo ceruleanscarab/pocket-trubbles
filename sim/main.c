@@ -161,6 +161,8 @@ static void film_just_over(tank_t *t, float share) {
 }
 
 /* ---------- headless selftest ---------- */
+static int n_amb;                                  /* selftest: TEV_AMBIENTs heard */
+static void count_ambience(int ev, int fish, void *ud) { (void)fish; (void)ud; if (ev == TEV_AMBIENT) n_amb++; }
 static int selftest(void) {
     tank_init(&tank, 1234);
     tank_new_population(&tank);
@@ -233,6 +235,21 @@ static int selftest(void) {
         for (int i = 0; i < 600; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
         if (tank.player_feedings != meals + 1) { printf("FAIL: an eaten feeding counted %d meals\n", tank.player_feedings - meals); return 1; }
         printf("selftest: meals: an uneaten feeding counted nothing, an eaten one counted once\n");
+    }
+    {   /* the ambience (2026-10-12): one sound every 60-120 s of lit, uncovered time; none in the dark or under a page */
+        tank_events_set(count_ambience, NULL);
+        int got[3];
+        for (int phase = 0; phase < 3; phase++) {
+            tank.light_override = true; tank.light_on = phase != 1; tank.ui_cover = phase == 2;
+            n_amb = 0;
+            for (int i = 0; i < 6000; i++) tank_tick(&tank, 0.1f, advisor_rules);   /* 10 minutes */
+            got[phase] = n_amb;
+        }
+        tank_events_set(NULL, NULL); tank.light_override = false; tank.ui_cover = false;
+        if (got[0] < 5 || got[0] > 10 || got[1] || got[2]) {
+            printf("FAIL: ambience %d in 10 lit minutes (want 5-10), %d dark, %d covered (want 0)\n", got[0], got[1], got[2]); return 1;
+        }
+        printf("selftest: ambience: %d sounds in 10 lit minutes, none in the dark or under a page\n", got[0]);
     }
     return distinct >= 5 ? 0 : 1;                 /* a live tank uses most goals */
 }
@@ -2030,6 +2047,7 @@ static void on_tank_event(int ev, int fish, void *ud) {
     case TEV_WELCOME:     snd(SND_WELCOME, AUDIO_PITCH_ONE); break;
     case TEV_WHEEL_TICK:  snd(SND_WHEEL_TICK, AUDIO_PITCH_ONE); break;
     case TEV_CONFIRM:     snd(SND_CONFIRM, AUDIO_PITCH_ONE); break;
+    case TEV_AMBIENT:     snd(SND_AMBIENT, AUDIO_PITCH_ONE); break;
     default: break;
     }
 }

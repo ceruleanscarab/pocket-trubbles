@@ -113,9 +113,10 @@ Tiers are build order. Tier 1 alone is a shippable feature.
 
 | id | when | notes |
 |---|---|---|
-| `eat` | a fish takes a pellet | 2-4 variants, max one per 250 ms, pitch by stage (fry high, elder low) |
-| `spook` | 3-tap aggression fires, fish flee | once per spook episode, not per tap |
-| `investigate` | a long hold draws a fish over (trust earned) | gentle, once per hold |
+| `eat` | a fish takes a pellet | 2-4 variants, max one per 250 ms, pitch by stage (fry high, elder low). Since 2026-10-12: three Trubble coos (section 5b) |
+| `spook` | 3-tap aggression fires, fish flee | once per spook episode, not per tap. Since 2026-10-12: three angry Trubble sounds |
+| `investigate` | a long hold draws a fish over (trust earned) | gentle, once per hold. Since 2026-10-12: a coo |
+| `ambient` | every 60-120 s of lit time with no page over the tank (`TEV_AMBIENT`, `AMBIENT_MIN_S` / `AMBIENT_MAX_S` in tank.h) | added 2026-10-12: the pod's ambience, three quiet one-shots (-12 dB), picked at random. Tier 2, so silent at night; also at volume off and, on the device, on a low battery. One-shots, not a loop: the amp sleeps between them (rule 3.1) |
 | `bubbles` | a fish reaches the column for play (`GOAL_VISIT_BUBBLES` arrival) | DEFERRED by Strato 2026-09-15 after the first listen: fish visit the column too often for a cue to mean anything. The event still fires; the id stays |
 | `beg` | a hungry fish begging at the glass | DEFERRED by Strato 2026-09-15; if it comes back: very quiet, cooldown 30 s per fish, never at night |
 
@@ -123,8 +124,8 @@ Tiers are build order. Tier 1 alone is a shippable feature.
 
 | id | when | notes |
 |---|---|---|
-| `welcome` | a fresh install: the first-run setup's welcome page comes up (`setup_begin` when `progression_setup_pending()`) | the tank's very first sound; a reset (BOOT+tap, YES) lands here too, so it is also the "new tank" sound. Up to ~2 s. Plays once per setup flow, never on an ordinary boot |
-| `arrival` | a fry arrives / birth flow announce | the one "big" sound, ~1.5 s |
+| `welcome` | a fresh install: the first-run setup's welcome page comes up (`setup_begin` when `progression_setup_pending()`) | since 2026-10-12 a long Trubble coo. The tank's very first sound; a reset (BOOT+tap, YES) lands here too, so it is also the "new tank" sound. Up to ~2 s. Plays once per setup flow, never on an ordinary boot |
+| `arrival` | a fry arrives / birth flow announce | the one "big" sound, ~1.5 s; since 2026-10-12 a long Trubble coo |
 | `milestone` | a milestone or checklist line earned | plays with the milestone modal (section 4a) |
 | `stage_up` | fry -> juv -> adult -> elder | |
 | `sleep`, `wake` | PWR key press to sleep / wake | DEFERRED by Strato 2026-09-15, no cue yet; wake would play after the codec is up, so ~100 ms into the boot |
@@ -132,7 +133,7 @@ Tiers are build order. Tier 1 alone is a shippable feature.
 | `low_battery` | gauge falls to 10% | once per discharge, with the low-battery modal and the persistent pill (section 4a) |
 | `error` | save failed, reset prompt | |
 
-Not in scope: music, ambient loops, a per-decision sound (the LLM decides
+Not in scope: music, ambient LOOPS (the 2026-10-12 `ambient` cue is occasional one-shots), a per-decision sound (the LLM decides
 every ~4 s per fish; that would be constant noise), any sound in drowse.
 Deferred by Strato (2026-09-15): `tap`, `wipe`, `card_close`, `sleep`, `wake`, `beg`, `bubbles`.
 
@@ -267,6 +268,37 @@ ignores the older files, so nothing needs deleting. The tool maps
 `sound-bubble_cluster` -> `bubbles`, `sound-spook_dash` -> `spook`, and
 ignores `sound-confusion`. Bank size for this batch after trimming: about 600 KB at 16 kHz
 s16, well inside the app partition.
+
+## 5b. Second batch: the Trubbles' voices and the ambience (2026-10-12)
+
+Source: the keeper's recordings (`trubble_coos.mp3` 19 s, `trubble_angry.mp3`
+11 s, `ambient_bridge_6/7/10.mp3` 1.2-4.4 s; `many_trubble.mp3`, a 60 s crowd,
+not used - 1.9 MB of bank). The two long recordings were cut at their silences
+(ffmpeg `silencedetect`, -40 dB, 0.25 s) into ten coos and four angry sounds;
+`make_sounds.py import` then did the usual fold, band-limit, trim and
+normalize.
+
+| cue | clips | gain_db |
+| --- | --- | --- |
+| `welcome` | coo 1 (1.9 s) | -3.1 (kept) |
+| `arrival` | coo 6 (1.9 s) | -1.6 (kept) |
+| `eat` | coos 2, 3, 4 (0.8-1.0 s) | -10.0 (was -14 for a 0.2 s click) |
+| `investigate` | coo 5 (0.8 s) | -8.0 (kept) |
+| `spook` | angry 1, 2, 3 (1.1 s) | -3.0 (was +0.4) |
+| `ambient` | ambient_bridge 6, 7, 10 (1.2, 4.4, 3.3 s) | -12.0, under everything |
+
+Every other cue's file is byte-for-byte the first batch's. The gains are
+first guesses: tune on the device, by ear. Coos 7-10 and angry 4 went
+unused - `sleep`, `wake` and `error` are in the enum but nothing plays them.
+
+The import only reads the export folder and rebuilds `assets/sounds/` from
+it, so a partial batch needs the current files staged beside it (as
+`sound-<cue>[-n].wav`); restore the untouched ones from git afterwards so they
+are not filtered twice.
+
+**Size:** the bank went from 530 KB to 972 KB, and the app from 22% to 5%
+(124 KB) free in its 2.5 MB partition - about 4 s more of sound fits. If a
+later change needs room, the 4.4 s ambient clip is the first to trim.
 
 ## 6. Acceptance
 

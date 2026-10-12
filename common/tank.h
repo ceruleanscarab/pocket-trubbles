@@ -568,6 +568,8 @@ typedef struct tank {
                                     * milestones, settings, the shop) - a fry's spawning
                                     * waits, so the keeper never misses it (2026-09-24).
                                     * Set every frame; not saved. */
+    float    ambient_due;          /* seconds to the next ambient sound (TEV_AMBIENT); 0 = draw one */
+    uint32_t ambient_rng;          /* its own LCG, so t->rng's draws are untouched. Not saved. */
     uint8_t  roster_gen;           /* ticks when a fish leaves and the slots shift (tank_remove_fish):
                                     * the advisors drop what they were asked about the old slots.
                                     * Not saved. */
@@ -797,6 +799,8 @@ float tank_dist(float ax, float ay, float bx, float by);
  * one-way shelves in the top row of zones - a Trubble hops up through one
  * from below and lands on it from above. */
 #define TRUB_R       17.0f      /* body radius at size 1 (15 until 2026-10-12: a little bigger) */
+#define AMBIENT_MIN_S 60.0f      /* the pod's ambience: one sound every 60-120 s of lit time (2026-10-12) */
+#define AMBIENT_MAX_S 120.0f
 #define GRAVITY      900.0f     /* px/s^2 */
 #define FLOOR_Y      (TANK_BOT - 16.0f)
 #define N_LEDGES     3
