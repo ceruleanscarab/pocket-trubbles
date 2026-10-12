@@ -1,3 +1,4 @@
+#include "theme.h"
 #include "progression.h"
 #include "tank_events.h"
 #include "version.h"
@@ -19,16 +20,16 @@
 #define SAVE_MIN_GAP_S   30.0f
 
 const char *const MS_NAMES[MS_FISH_COUNT] = {
-    "arrived", "first meal from you", "first hold-approach", "first roll", "first song",
+    "arrived", "first meal from you", "first hold-approach", TH("first roll", "first wriggle"), TH("first song", "first chant"),
     "(inspected)", "(retired)", "(retired)", "first cuddle",
-    "became a tuft", "became a fluff", "became an old fluff",
-    "first nap in the moss",
+    TH("became a tuft", "became a young one"), TH("became a fluff", "became an elder"), TH("became an old fluff", "became an old one"),
+    TH("first nap in the moss", "first dream in the kelp"),
 };
 const char *const TMS_NAMES[TMS_COUNT] = {
     "a pair", "a trio", "a quartet", "a quintet", "a sextet",
-    "first full night's sleep", "first play session", "the pod changed someone", "first feeding",
-    "first trimming", "first glass cleaning",   /* the pod's front glass, not the starfield viewport */ "a colony of ten mites",
-    "first visit to the crystals",
+    "first full night's sleep", "first play session", TH("the pod changed someone", "r'lyeh changed someone"), "first feeding",
+    "first trimming", "first glass cleaning",   /* the pod's front glass, not the starfield viewport */ TH("a colony of ten mites", "a colony of ten isopods"),
+    TH("first visit to the crystals", "first visit to the glyphs"),
 };
 
 /* the save keeps 644 film cells - the rectangle's 28 x 23 grid, frozen by the
@@ -302,13 +303,13 @@ void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t);
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
 const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
-    { SD_ITEM_PLANT, "TALL FERN", "FEATHERY, TALL FRONDS", "MORE COVER FOR YOUR TRUBBLES", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
-    { SD_ITEM_SNAIL, "CLEANING BOT", "SCRUBS THE GLASS CLEAN,",  "EVEN WHILE THE POD SLEEPS",   SD_PRICE_SNAIL },
-    { SD_ITEM_CASTLE, "CARGO CRATES", "A STACK OF CARGO CRATES,", "TRUBBLES ROLL THROUGH IT",   SD_PRICE_CASTLE },   /* 2026-09-16 */
-    { SD_ITEM_CORAL,  "GLOW FUNGUS", "A BRANCHING GLOW FUNGUS,", "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
-    { SD_ITEM_CLUSTER, "CRYSTAL CLUSTER", "CRYSTALS ON A STONE BASE,", "FILLS OUT, THEN IT SPARKLES", SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
-    { SD_ITEM_SHRIMP,  "CRUMB MITES", "A COLONY OF CRUMB MITES", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
-    { SD_ITEM_URCHIN,  "MOWING BOT", "TRIMS THE TALL MOSS,",     "EVEN WHILE THE POD SLEEPS",   SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    { SD_ITEM_PLANT, TH("TALL FERN", "TALL KELP"), TH("FEATHERY, TALL FRONDS", "SWAYING, TALL FRONDS"), TH("MORE COVER FOR YOUR TRUBBLES", "MORE COVER FOR YOUR SPAWN"), SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
+    { SD_ITEM_SNAIL, TH("CLEANING BOT", "GLASS SLUG"), "SCRUBS THE GLASS CLEAN,",  TH("EVEN WHILE THE POD SLEEPS", "EVEN WHILE R'LYEH SLEEPS"),   SD_PRICE_SNAIL },
+    { SD_ITEM_CASTLE, TH("CARGO CRATES", "SUNKEN RUINS"), TH("A STACK OF CARGO CRATES,", "A HEAP OF ANCIENT STONES,"), TH("TRUBBLES ROLL THROUGH IT", "SPAWN CRAWL THROUGH IT"),   SD_PRICE_CASTLE },   /* 2026-09-16 */
+    { SD_ITEM_CORAL,  TH("GLOW FUNGUS", "ELDER CORAL"), TH("A BRANCHING GLOW FUNGUS,", "A BRANCHING ELDER CORAL,"), "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
+    { SD_ITEM_CLUSTER, TH("CRYSTAL CLUSTER", "GLYPH STONES"), TH("CRYSTALS ON A STONE BASE,", "GLYPHS ON A STONE BASE,"), TH("FILLS OUT, THEN IT SPARKLES", "FILLS OUT, THEN IT GLOWS"), SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
+    { SD_ITEM_SHRIMP,  TH("CRUMB MITES", "PALE ISOPODS"), TH("A COLONY OF CRUMB MITES", "A COLONY OF PALE ISOPODS"), "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
+    { SD_ITEM_URCHIN,  TH("MOWING BOT", "KELP CRAB"), TH("TRIMS THE TALL MOSS,", "TRIMS THE TALL KELP,"),     TH("EVEN WHILE THE POD SLEEPS", "EVEN WHILE R'LYEH SLEEPS"),   SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
@@ -400,10 +401,10 @@ const char *const *progression_sd_earn_lines(void) {
         /* <= 25 chars each: the modal is 336 px wide at scale 2 */
         snprintf(lines[0], 30, "+%d  EVERY MEAL EATEN", SD_MEAL);
         snprintf(lines[1], 30, "+%d/%d/%d  GROWING UP", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
-        snprintf(lines[2], 30, "+%d  A NEW PIP BUDS", SD_BIRTH);
-        snprintf(lines[3], 30, "+%d  A TRUBBLE TRUSTS YOU", SD_TRUST);
-        snprintf(lines[4], 30, "+%d  %d PATCHES OF GRIME", SD_CHORE, SD_CHORE_EVERY);
-        snprintf(lines[5], 30, "+%d  %d CM OF MOSS CUT", SD_CHORE, SD_TRIM_CM);
+        snprintf(lines[2], 30, TH("+%d  A NEW PIP BUDS", "+%d  A NEW LARVA SPAWNS"), SD_BIRTH);
+        snprintf(lines[3], 30, TH("+%d  A TRUBBLE TRUSTS YOU", "+%d  A SPAWN TRUSTS YOU"), SD_TRUST);
+        snprintf(lines[4], 30, TH("+%d  %d PATCHES OF GRIME", "+%d  %d PATCHES OF SLIME"), SD_CHORE, SD_CHORE_EVERY);
+        snprintf(lines[5], 30, TH("+%d  %d CM OF MOSS CUT", "+%d  %d CM OF KELP CUT"), SD_CHORE, SD_TRIM_CM);
         for (int i = 0; i < SD_EARN_LINES; i++) ptr[i] = lines[i];
         ptr[SD_EARN_LINES] = NULL; made = true;
     }
@@ -564,13 +565,13 @@ static void arrival_conditions(const tank_t *t, int *met, int *total) {
 }
 
 /* how each gate is moved - the words behind the HOW? button */
-static const char *const TIP_TRUST[]  = { "REST A FINGER ON THE GLASS", "AND KEEP IT STILL. EVERY", "TRUBBLE GAINS TRUST WHILE", "IT RESTS. 3 QUICK TAPS", "SCARE THEM AND COST TRUST.", NULL };
-static const char *const TIP_FEED[]   = { "TAP NEAR THE TOP OF THE", "POD TO DROP FOOD.", "A FEEDING COUNTS AS A MEAL", "ONCE A TRUBBLE EATS IT.", NULL };
-static const char *const TIP_HOLD[]   = { "REST A FINGER ON THE GLASS", "FOR A FEW SECONDS. A", "TRUBBLE THAT TRUSTS YOU", "ROLLS OVER AND STAYS. FEED", "FIRST: A HUNGRY ONE WON'T.", NULL };
-static const char *const TIP_GROW[]   = { "TRUBBLES GROW WITH TIME,", "SLOWER WHEN THE POD IS", "IN SLEEP MODE.", NULL };
+static const char *const TIP_TRUST[]  = { "REST A FINGER ON THE GLASS", "AND KEEP IT STILL. EVERY", TH("TRUBBLE GAINS TRUST WHILE", "SPAWN GAINS TRUST WHILE"), "IT RESTS. 3 QUICK TAPS", "SCARE THEM AND COST TRUST.", NULL };
+static const char *const TIP_FEED[]   = { "TAP NEAR THE TOP OF THE", TH("POD TO DROP FOOD.", "WATER TO DROP FOOD."), "A FEEDING COUNTS AS A MEAL", TH("ONCE A TRUBBLE EATS IT.", "ONCE A SPAWN EATS IT."), NULL };
+static const char *const TIP_HOLD[]   = { "REST A FINGER ON THE GLASS", "FOR A FEW SECONDS. A", TH("TRUBBLE THAT TRUSTS YOU", "SPAWN THAT TRUSTS YOU"), TH("ROLLS OVER AND STAYS. FEED", "COMES OVER AND STAYS. FEED"), "FIRST: A HUNGRY ONE WON'T.", NULL };
+static const char *const TIP_GROW[]   = { TH("TRUBBLES GROW WITH TIME,", "SPAWN GROW WITH TIME,"), TH("SLOWER WHEN THE POD IS", "SLOWER WHILE R'LYEH IS"), "IN SLEEP MODE.", NULL };
 static const char *const TIP_CHANGE[] = { "PERSONALITIES WILL", "NATURALLY DRIFT AS THEY", "INTERACT WITH THE WORLD.", NULL };   /* Strato: intentionally vague */
-static const char *const TIP_GRASS[]  = { "MOSS REGROWS ON ITS OWN,", "FASTEST WHILE THE POD", "SLEEPS.", NULL };
-static const char *const TIP_CONTENT[] = { "A TRUBBLE GROWS CONTENT", "WHEN IT IS FED, STROKED", "AND LEFT IN PEACE. A", "CONTENT FLUFF MAY BUD.", NULL };
+static const char *const TIP_GRASS[]  = { TH("MOSS REGROWS ON ITS OWN,", "KELP REGROWS ON ITS OWN,"), TH("FASTEST WHILE THE POD", "FASTEST WHILE R'LYEH"), "SLEEPS.", NULL };
+static const char *const TIP_CONTENT[] = { TH("A TRUBBLE GROWS CONTENT", "A SPAWN GROWS CONTENT"), "WHEN IT IS FED, STROKED", "AND LEFT IN PEACE. A", TH("CONTENT FLUFF MAY BUD.", "CONTENT ELDER MAY SPAWN."), NULL };
 static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
     switch (kind) {
@@ -586,7 +587,7 @@ const char *const *progression_fry_tip(int kind) {
 }
 
 /* the checklist, in words. No %f: the device's printf may be the nano one. */
-static const char *const STAGE_WORDS[4] = { "A PIP", "A TUFT", "A FLUFF", "AN OLD FLUFF" };
+static const char *const STAGE_WORDS[4] = { TH("A PIP", "A LARVA"), TH("A TUFT", "A YOUNG ONE"), TH("A FLUFF", "AN ELDER"), TH("AN OLD FLUFF", "AN OLD ONE") };
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 1) return 0;
@@ -600,7 +601,7 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         switch (g[i].kind) {
         case FRY_REQ_TRUST:
             snprintf(r->title, sizeof r->title, "TRUST");
-            snprintf(r->words, sizeof r->words, "EVERY TRUBBLE NEEDS TRUST");
+            snprintf(r->words, sizeof r->words, TH("EVERY TRUBBLE NEEDS TRUST", "EVERY SPAWN NEEDS TRUST"));
             snprintf(r->words2, sizeof r->words2, "OF AT LEAST %d OUT OF 10", need);
             if (r->met) snprintf(r->progress, sizeof r->progress, "EVERY ONE DOES");
             else { int tenths = (int)(g[i].have * 10 + 0.5f);
@@ -608,7 +609,7 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
             break;
         case FRY_REQ_FEED:
             snprintf(r->title, sizeof r->title, "MEALS");
-            snprintf(r->words, sizeof r->words, "FEED THE POD AT LEAST");
+            snprintf(r->words, sizeof r->words, TH("FEED THE POD AT LEAST", "FEED THE SPAWN AT LEAST"));
             snprintf(r->words2, sizeof r->words2, "%d TIMES IN ALL", need);
             if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
             else snprintf(r->progress, sizeof r->progress, "%d OF %d SO FAR", have, need);
@@ -616,14 +617,14 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         case FRY_REQ_HOLD:
             snprintf(r->title, sizeof r->title, "HOLD");
             snprintf(r->words, sizeof r->words, "REST A FINGER ON THE GLASS");
-            snprintf(r->words2, sizeof r->words2, "UNTIL A TRUBBLE ROLLS UP");
+            snprintf(r->words2, sizeof r->words2, TH("UNTIL A TRUBBLE ROLLS UP", "UNTIL A SPAWN CREEPS UP"));
             snprintf(r->progress, sizeof r->progress, r->met ? "DONE" : "NOT YET");
             break;
         case FRY_REQ_GROW: {
             const fish_t *f = &t->fish[t->n_fish - 1];
             snprintf(r->title, sizeof r->title, "GROW");
             snprintf(r->words, sizeof r->words, "THE YOUNGEST MUST");
-            snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? "GROW INTO A FLUFF" : "GROW INTO A TUFT");
+            snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? TH("GROW INTO A FLUFF", "GROW INTO AN ELDER") : TH("GROW INTO A TUFT", "GROW INTO A YOUNG ONE"));
             snprintf(r->progress, sizeof r->progress, "%s IS %s", f->name, STAGE_WORDS[f->stage & 3]);
             break; }
         case FRY_REQ_CHANGE: {
@@ -638,18 +639,18 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
             int pct = (int)(g[i].have * 100 + 0.5f), limit = (int)(ALGAE_DIRTY * 100 + 0.5f);
             snprintf(r->title, sizeof r->title, "GLASS");
             snprintf(r->words, sizeof r->words, "NO MORE THAN %d%%", limit);          /* Strato's words, 2026-09-16 */
-            snprintf(r->words2, sizeof r->words2, "GRIME COVERAGE");
+            snprintf(r->words2, sizeof r->words2, TH("GRIME COVERAGE", "SLIME COVERAGE"));
             if (r->met) snprintf(r->progress, sizeof r->progress, "CURRENTLY CLEAN ENOUGH");
             else snprintf(r->progress, sizeof r->progress, "%d%% COVERED NOW", pct);
             break; }
         case FRY_REQ_CONTENT: {
             snprintf(r->title, sizeof r->title, "CONTENT");
-            snprintf(r->words, sizeof r->words, "A FLUFF MUST STAY CONTENT");
+            snprintf(r->words, sizeof r->words, TH("A FLUFF MUST STAY CONTENT", "AN ELDER MUST STAY CONTENT"));
             snprintf(r->words2, sizeof r->words2, "FOR %d LIT MINUTES", need / 60);
             bool fluff = false;
             for (int k = 0; k < t->n_fish; k++) fluff |= t->fish[k].stage >= STAGE_ADULT;
             if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
-            else if (!fluff) snprintf(r->progress, sizeof r->progress, "NO FLUFF YET");
+            else if (!fluff) snprintf(r->progress, sizeof r->progress, TH("NO FLUFF YET", "NO ELDER YET"));
             else snprintf(r->progress, sizeof r->progress, "%d OF %d MIN", have / 60, need / 60);
             break; }
         }

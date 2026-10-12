@@ -233,9 +233,15 @@ const uint32_t CORAL_PAL[CORAL_N] = { 0xff7a1e, 0xf2698f, 0xd24bb4, 0x8a5be0, 0x
 const cluster_scheme_t CLUSTER_SCHEMES[CLUSTER_SCHEME_N] = {
     /* (Trubbles, 2026-10-08) the crystal cluster's looks: the save keeps the
        index, so the names and colours are free to change */
+#ifdef THEME_CTHULHU                       /* the glyph stones' looks: a sickly glow, the abyss, a drowned gold */
+    { "SICKLY",   0x9fe07a, 0x5f8f6a, 0xc9f58a },
+    { "ABYSSAL",  0x4fb8a8, 0x2f5f7a, 0x8fe0d0 },
+    { "DROWNED",  0xc8b35a, 0x7a6a3a, 0xe8d88a },
+#else
     { "AMETHYST", 0xb07cff, 0x7c5cff, 0x5fd8e8 },
     { "AURORA",   0x5ff0c8, 0x3f8ff0, 0xb9e4ff },
     { "EMBER",    0xff8a5a, 0xffc04a, 0xe25cff },
+#endif
 };
 
 void tank_set_name(tank_t *t, int slot, const char *name) {

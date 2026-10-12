@@ -1,0 +1,8 @@
+# SDL2 source, fetched by fetch_sdl.sh
+third_party/
+# Gradle and the NDK build
+.gradle/
+build/
+app/build/
+app/.cxx/
+local.properties

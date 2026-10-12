@@ -48,6 +48,7 @@
 #define _DEFAULT_SOURCE   /* glibc hides setenv / strdup / truncate under -std=c11; an undeclared
                              strdup returns a truncated int and --selftest-saves crashed in CI */
 #endif
+#include "theme.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -374,7 +375,7 @@ static int selftest_pop(void) {
         if (n != 5 || staged) { printf("FAIL: a new pod should list 5 bud gates, none staged (%d, %d)\n", n, staged); return 1; }
         int met = 0; for (int i = 0; i < n; i++) met += req[i].met;
         if (req[0].kind != FRY_REQ_TRUST || req[1].kind != FRY_REQ_FEED || req[2].kind != FRY_REQ_HOLD || req[3].kind != FRY_REQ_GLASS || req[4].kind != FRY_REQ_CONTENT
-            || met != 1 || !req[3].met || req[4].met || strcmp(req[4].progress, "NO FLUFF YET")) {
+            || met != 1 || !req[3].met || req[4].met || strcmp(req[4].progress, TH("NO FLUFF YET", "NO ELDER YET"))) {
             printf("FAIL: a fresh pod's gates: %d met, glass %d, content %d '%s'\n", met, req[3].met, req[4].met, req[4].progress); return 1; }
         printf("selftest-pop: bud checklist: %d gates (%s / %s / %s / %s / %s)\n", n, req[0].progress, req[1].progress, req[2].progress, req[3].progress, req[4].progress);
         tank.player_feedings = 12; progression_next_fry(&tank, req, &staged);
@@ -1961,6 +1962,9 @@ static int selftest_tend(void) {
 /* ---------- LVGL + SDL ---------- */
 #include "lvgl/lvgl.h"
 #include <SDL2/SDL.h>
+#ifdef __ANDROID__
+#include "android_port.h"                 /* android/app/jni: the APK's files, the screen, the finger */
+#endif
 
 static lv_draw_buf_t draw_buf;
 static uint16_t canvas_buf[TANK_W * TANK_H];
@@ -4455,6 +4459,14 @@ static int selftest_card(const char *prefix) {
     return 0;
 }
 
+#ifdef __ANDROID__
+/* the app leaving the screen (home, another app, the phone locked): save, as the sim's sleep key does */
+static int android_lifecycle(void *ud, SDL_Event *e) {
+    (void)ud;
+    if (e->type == SDL_APP_WILLENTERBACKGROUND || e->type == SDL_APP_TERMINATING) progression_save(&tank);
+    return 0;
+}
+#endif
 int main(int argc, char **argv) {
     for (int a = 1; a < argc; a++)
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
@@ -4482,6 +4494,9 @@ int main(int argc, char **argv) {
             return selftest_llm(a + 1 < argc ? atoi(argv[a + 1]) : 0);
     }
 
+#ifdef __ANDROID__
+    android_prepare();                     /* before the save, the sounds and the model are looked for */
+#endif
     tank_init(&tank, (uint32_t)SDL_GetTicks() + 7);
     battery_init(&sim_bat, NULL);
     bool fresh = false;
@@ -4529,6 +4544,9 @@ int main(int argc, char **argv) {
 
     last_ms = SDL_GetTicks();
     lv_timer_create(frame_cb, 16, NULL);
+#ifdef __ANDROID__
+    SDL_AddEventWatch(android_lifecycle, NULL);   /* save when the app goes to the background */
+#endif
 
     bool fdown = false, ndown = false, ldown = false;
     bool udown = false, mdown = false, mkdown = false, rdown = false, zdown = false, gdown = false, xdown = false, sdown = false, vdown = false, bdown = false, fourdown = false, ddown = false;
@@ -4547,6 +4565,10 @@ int main(int argc, char **argv) {
         const Uint8 *k = SDL_GetKeyboardState(NULL);
         int mx, my;
         bool mpress = SDL_GetMouseState(&mx, &my) & SDL_BUTTON(SDL_BUTTON_LEFT);
+#ifdef __ANDROID__
+        android_fit(disp);                       /* the screen's size settles after the window opens */
+        android_map_mouse(disp, canvas, &mx, &my);
+#endif
         if (sim_view_turned()) { mx = TANK_W - 1 - mx; my = TANK_H - 1 - my; }   /* the window shows the glass turned: the finger is too */
         { static int lmx = -1, lmy = -1;            /* a hand near the tank: the mouse moving over the window */
           if (mx != lmx || my != lmy || mpress || k[SDL_SCANCODE_H]) tank_handled(&tank);

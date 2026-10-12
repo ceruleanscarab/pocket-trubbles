@@ -28,6 +28,8 @@ firmware/keys/
 # over-the-air release output (tools/make_ota_manifest.py)
 ota/
 sim/build-round/
+sim/build-cthulhu/
+sim/fishsim-cthulhu
 sim/build-watch/
 sim/fishsim-round
 sim/fishsim-watch
