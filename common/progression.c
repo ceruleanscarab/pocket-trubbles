@@ -19,16 +19,16 @@
 #define SAVE_MIN_GAP_S   30.0f
 
 const char *const MS_NAMES[MS_FISH_COUNT] = {
-    "arrived", "first meal from you", "first hold-approach", "first dart", "first bubbles",
-    "(inspected)", "(retired)", "(retired)", "first follow",
-    "reached juv", "reached adult", "reached elder",
-    "first rest in the seagrass",
+    "arrived", "first meal from you", "first hold-approach", "first roll", "first song",
+    "(inspected)", "(retired)", "(retired)", "first cuddle",
+    "became a tuft", "became a fluff", "became an old fluff",
+    "first nap in the moss",
 };
 const char *const TMS_NAMES[TMS_COUNT] = {
     "a pair", "a trio", "a quartet", "a quintet", "a sextet",
-    "first full night's sleep", "first play session", "the tank changed someone", "first feeding",
-    "first trimming", "first glass cleaning", "a school of ten shrimp",
-    "first visit to the reef",
+    "first full night's sleep", "first play session", "the pod changed someone", "first feeding",
+    "first trimming", "first glass cleaning",   /* the pod's front glass, not the starfield viewport */ "a colony of ten mites",
+    "first visit to the crystals",
 };
 
 /* the save keeps 644 film cells - the rectangle's 28 x 23 grid, frozen by the
@@ -157,6 +157,12 @@ typedef struct {
      * which every build wrote as zeros - still 1688 B; older saves read 0
      * and get the notice once. */
     uint8_t  light_tip_seen, pad_tip[3];
+    /* the Trubbles tail (2026-10-08, budding): each one's chatty trait (0 =
+     * an older save: keep the one tank_make_fish derives from the slot - a
+     * real one is never 0) and its banked content seconds toward a bud
+     * (older saves: nothing banked) */
+    float    chatty[N_FISH_MAX];
+    float    bud_s[N_FISH_MAX];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -238,7 +244,9 @@ SAVE_AT(urchin_x, 1676); SAVE_AT(urchin_grazed_px, 1680);                       
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(light_tip_seen, 1684); SAVE_AT(pad_tip, 1685);                                                 /* the lights-out notice, 10-03 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
-/* (the next field: SAVE_AT(its_name, 1688 or its type's alignment past it);) */
+SAVE_AT(chatty, 1688); SAVE_AT(bud_s, 1712);                                                           /* Trubbles budding, 10-08 */
+_Static_assert(sizeof(save_t) >= 1736, "SAVE LAYOUT LOCK: save_t only ever grows");
+/* (the next field: SAVE_AT(its_name, 1736 or its type's alignment past it);) */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
  * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
  * entries of 32 B, and NVS keeps one page free for its garbage collection:
@@ -249,14 +257,15 @@ _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows
  * is 3 x ~128 = ~390 entries, plus ~10 for the settings, "bat"/"hist" and
  * the batlog's "bed": under 2/3 of the 630, so GC always has room. Past it,
  * saves can start failing for space, and any nvs_flash_init error makes
- * main.c ERASE the partition. 1688 B today (the urchin, 2026-10-02: its x and its tally after the
- * watch's way up; ~54 entries a copy): 2312 B of headroom. */
+ * main.c ERASE the partition. 1736 B today (the Trubbles tail, 2026-10-08: chatty and the
+ * bud bank; ~55 entries a copy): 2264 B of headroom. */
 #define SAVE_NVS_BUDGET 4000
 _Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
 
 float progression_time_scale = 1.0f;
 
 static float s_age[N_FISH_MAX];      /* seconds of tended life per fish */
+static float s_bud[N_FISH_MAX];      /* budding: lit seconds banked content as a fluff (progression.h BUD_*) */
 static uint32_t s_loaded_release;    /* the release that wrote the save this boot loaded (0 = older / none) */
 static int64_t  s_loaded_unix;       /* ... and its wall-clock stamp (0 = none) */
 static float s_since_save, s_dirty_since;
@@ -293,13 +302,13 @@ void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t);
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
 const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
-    { SD_ITEM_PLANT, "SWORD PLANT", "BROAD, VERTICAL LEAVES", "MORE COVER FOR YOUR CRITTERS", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
-    { SD_ITEM_SNAIL, "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_SNAIL },
-    { SD_ITEM_CASTLE, "CASTLE",     "STONE TOWERS AND AN ARCH",  "THE FISH SWIM THROUGH IT",    SD_PRICE_CASTLE },   /* 2026-09-16 */
-    { SD_ITEM_CORAL,  "CORAL",      "A BRANCHING REEF CORAL,",   "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
-    { SD_ITEM_CLUSTER, "REEF CLUSTER", "A MATURE REEF ON A ROCK,", "FILLS OUT, THEN IT BLOOMS",  SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
-    { SD_ITEM_SHRIMP,  "SHRIMP",    "A SCHOOL OF CHERRY SHRIMP", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
-    { SD_ITEM_URCHIN,  "SEA URCHIN", "NIBBLES THE TALL GRASS,",  "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    { SD_ITEM_PLANT, "TALL FERN", "FEATHERY, TALL FRONDS", "MORE COVER FOR YOUR TRUBBLES", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
+    { SD_ITEM_SNAIL, "CLEANING BOT", "SCRUBS THE GLASS CLEAN,",  "EVEN WHILE THE POD SLEEPS",   SD_PRICE_SNAIL },
+    { SD_ITEM_CASTLE, "CARGO CRATES", "A STACK OF CARGO CRATES,", "TRUBBLES ROLL THROUGH IT",   SD_PRICE_CASTLE },   /* 2026-09-16 */
+    { SD_ITEM_CORAL,  "GLOW FUNGUS", "A BRANCHING GLOW FUNGUS,", "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
+    { SD_ITEM_CLUSTER, "CRYSTAL CLUSTER", "CRYSTALS ON A STONE BASE,", "FILLS OUT, THEN IT SPARKLES", SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
+    { SD_ITEM_SHRIMP,  "CRUMB MITES", "A COLONY OF CRUMB MITES", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
+    { SD_ITEM_URCHIN,  "MOWING BOT", "TRIMS THE TALL MOSS,",     "EVEN WHILE THE POD SLEEPS",   SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
@@ -356,8 +365,8 @@ bool progression_sell_fish(tank_t *t, int fish) {
     if (!progression_fish_sellable(t, fish)) return false;
     int worth = progression_fish_value(t, fish);
     if (!tank_remove_fish(t, fish)) return false;
-    for (int i = fish; i < t->n_fish; i++) s_age[i] = s_age[i + 1];   /* the clocks move down with their fish */
-    s_age[t->n_fish] = 0;
+    for (int i = fish; i < t->n_fish; i++) { s_age[i] = s_age[i + 1]; s_bud[i] = s_bud[i + 1]; }   /* the clocks move down with their fish */
+    s_age[t->n_fish] = 0; s_bud[t->n_fish] = 0;
     /* the slot it leaves is earned again by care, not handed back: a fry
        already on its way is called off, and the next one waits for
        SELL_FRY_MEALS more meals (care_gates) - every other gate was met long
@@ -390,11 +399,11 @@ const char *const *progression_sd_earn_lines(void) {
     if (!made) {
         /* <= 25 chars each: the modal is 336 px wide at scale 2 */
         snprintf(lines[0], 30, "+%d  EVERY MEAL EATEN", SD_MEAL);
-        snprintf(lines[1], 30, "+%d/%d/%d  A FISH GROWS UP", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
-        snprintf(lines[2], 30, "+%d  A NEW FRY IS BORN", SD_BIRTH);
-        snprintf(lines[3], 30, "+%d  A FISH FULLY TRUSTS", SD_TRUST);
-        snprintf(lines[4], 30, "+%d  %d ALGAE COLONIES", SD_CHORE, SD_CHORE_EVERY);
-        snprintf(lines[5], 30, "+%d  %d CM OF GRASS CUT", SD_CHORE, SD_TRIM_CM);
+        snprintf(lines[1], 30, "+%d/%d/%d  GROWING UP", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
+        snprintf(lines[2], 30, "+%d  A NEW PIP BUDS", SD_BIRTH);
+        snprintf(lines[3], 30, "+%d  A TRUBBLE TRUSTS YOU", SD_TRUST);
+        snprintf(lines[4], 30, "+%d  %d PATCHES OF GRIME", SD_CHORE, SD_CHORE_EVERY);
+        snprintf(lines[5], 30, "+%d  %d CM OF MOSS CUT", SD_CHORE, SD_TRIM_CM);
         for (int i = 0; i < SD_EARN_LINES; i++) ptr[i] = lines[i];
         ptr[SD_EARN_LINES] = NULL; made = true;
     }
@@ -420,10 +429,9 @@ static void apply_growth(fish_t *f) {
 
 static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_QUARTET, TMS_QUINTET, TMS_SEXTET };
 
-/* the parents: the two most trusting grown fish - or, with fewer than two
- * grown (at two fish no stage is gated), the most trusting of the rest fill
- * in, so there is always a pair to court (2026-09-24: the spawning needs
- * two fish in the grass; tank_add_fish already fell back to fish 0 and 1) */
+/* the fallback parents (Trubbles: a bud has one, the content fluff - this
+ * pick is for an arrival with no fluff to bud from: forced, or staged
+ * before budding): the two most trusting grown fish, the rest filling in */
 static float parent_rank(const fish_t *f) { return (f->stage >= STAGE_ADULT ? 100.0f : 0.0f) + f->trust; }
 static void pick_parents(const tank_t *t, int *pa, int *pb) {
     int a = -1, b = -1;
@@ -438,17 +446,30 @@ static void pick_parents(const tank_t *t, int *pa, int *pb) {
 /* the arrival itself: a fry in the nursery grass, traits inherited from the
  * parents; the stage clock starts from zero */
 static void do_arrival(tank_t *t) {
-    int a, b;
-    pick_parents(t, &a, &b);
+    /* (Trubbles) a bud from one parent: the content fluff; with none (a
+       forced arrival, a staged one from an older save) the old pick */
+    int a = progression_bud_parent(t), b = a;
+    if (a < 0) pick_parents(t, &a, &b);
     int slot = tank_add_fish(t, a, b);
     s_arrival_pending = false;
-    s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0;
+    s_spawn_in = -1;
+    float lx, ly, lr, neck;
+    bool split = t->bud_parent == a && a >= 0 && tank_bud_lump(t, &lx, &ly, &lr, &neck) && t->bud_t >= BUD_PINCH_S;
+    if (!split) t->bud_parent = -1;          /* (a wake or a forced arrival: no moment to finish) */
     if (slot < 0) return;
-    int nb = tank_nursery_bed(t);            /* born in the grass it was courted in */
-    if (nb >= 0) {
-        float x0, x1; tank_veg_bed(t, nb, &x0, &x1, NULL, NULL);
-        t->fish[slot].x = (x0 + x1) * 0.5f; t->fish[slot].y = TANK_BOT - 16 - 18;
+    fish_t *pip = &t->fish[slot];
+    if (split) {                             /* out of the lump, with a little hop away from its parent */
+        pip->x = lx; pip->y = ly; pip->perch = PERCH_AIR;
+        pip->vx = t->bud_dir * 70.0f; pip->vy = -230.0f;
+        t->fish[a].squash = 0.6f;            /* the parent's relieved bounce */
+    } else if (a >= 0) {                     /* beside its parent, dropped in to land */
+        const fish_t *p = &t->fish[a];
+        float side = p->x < TANK_W * 0.5f ? 1.0f : -1.0f;
+        pip->x = p->x + side * TRUB_R * (p->size + pip->size);
+        pip->y = p->y - TRUB_R; pip->perch = PERCH_AIR;
     }
+    if (a >= 0) s_bud[a] = 0;                /* the parent starts banking again */
+    s_bud[slot] = 0;
     s_age[slot] = 0;
     t->fish[slot].ms_bits = MS_ARRIVED;
     t->sd_paid_fish[slot] = 0;               /* a new ledger for the new fish */
@@ -464,7 +485,7 @@ static void do_arrival(tank_t *t) {
  * milestones page can LIST them (progression_next_fry, 2026-09-14). One
  * table serves both: `have` / `need` are the numbers behind the words. */
 typedef struct { int kind; float have, need, frac; bool met; } gate_t;
-#define CARE_GATES_MAX 4                 /* the population's three + the glass */
+#define CARE_GATES_MAX 5                 /* the population's three + the glass + a content fluff (Trubbles) */
 static int care_gates(const tank_t *t, gate_t g[CARE_GATES_MAX]) {
     float min_trust = 10;
     for (int i = 0; i < t->n_fish; i++)
@@ -477,7 +498,9 @@ static int care_gates(const tank_t *t, gate_t g[CARE_GATES_MAX]) {
 #define MEALS(tbl) ((float)((tbl) > s_sale_need ? (tbl) : s_sale_need))
 #define GATE(k, h, nd, m) do { g[n].kind = (k); g[n].have = (h); g[n].need = (nd); g[n].met = (m); \
         g[n].frac = g[n].met ? 1.0f : (nd) > 0 ? (h) / (nd) : 0; if (g[n].frac > 1) g[n].frac = 1; n++; } while (0)
-    switch (t->n_fish) {
+    /* (Trubbles, 2026-10-08) shifted down a step: a pod of one has the
+     * founding pair's gates, a pod of two the trio's, and so on */
+    switch (t->n_fish + 1) {
     case 2:
         GATE(FRY_REQ_TRUST, min_trust, 6.0f, min_trust >= 6.0f);
         GATE(FRY_REQ_FEED, (float)t->player_feedings, MEALS(12), t->player_feedings >= MEALS(12));
@@ -524,6 +547,12 @@ static int care_gates(const tank_t *t, gate_t g[CARE_GATES_MAX]) {
             g[n - 1].frac = frac < 0 ? 0 : frac > 1 ? 1 : frac;
         }
     }
+    /* and a content fluff to bud from (Trubbles): the most banked */
+    {
+        int p = progression_bud_parent(t);
+        float have = p >= 0 ? s_bud[p] : 0;
+        GATE(FRY_REQ_CONTENT, have, BUD_CONTENT_S, have >= BUD_CONTENT_S);
+    }
 #undef GATE
 #undef MEALS
     return n;
@@ -535,12 +564,13 @@ static void arrival_conditions(const tank_t *t, int *met, int *total) {
 }
 
 /* how each gate is moved - the words behind the HOW? button */
-static const char *const TIP_TRUST[]  = { "REST A FINGER ON THE GLASS", "AND KEEP IT STILL. EVERY", "FISH EARNS TRUST WHILE IT", "RESTS THERE. 3 QUICK TAPS", "SCARE THEM AND COST TRUST.", NULL };
-static const char *const TIP_FEED[]   = { "TAP THE WATER AT THE TOP", "OF THE TANK TO DROP FOOD.", "A FEEDING COUNTS AS A MEAL", "ONCE A FISH EATS FROM IT.", NULL };
-static const char *const TIP_HOLD[]   = { "REST A FINGER ON THE GLASS", "FOR A FEW SECONDS. A FISH", "THAT TRUSTS YOU SWIMS OVER", "AND STAYS. FEED FIRST: A", "HUNGRY FISH WON'T COME.", NULL };
-static const char *const TIP_GROW[]   = { "FISH GROW WITH TIME,", "SLOWER WHEN THE TANK IS", "IN SLEEP MODE.", NULL };
-static const char *const TIP_CHANGE[] = { "FISH PERSONALITIES WILL", "NATURALLY DRIFT AS THEY", "INTERACT WITH THE WORLD.", NULL };   /* Strato: intentionally vague */
-static const char *const TIP_GRASS[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST WHILE THE TANK", "SLEEPS.", NULL };
+static const char *const TIP_TRUST[]  = { "REST A FINGER ON THE GLASS", "AND KEEP IT STILL. EVERY", "TRUBBLE GAINS TRUST WHILE", "IT RESTS. 3 QUICK TAPS", "SCARE THEM AND COST TRUST.", NULL };
+static const char *const TIP_FEED[]   = { "TAP NEAR THE TOP OF THE", "POD TO DROP FOOD.", "A FEEDING COUNTS AS A MEAL", "ONCE A TRUBBLE EATS IT.", NULL };
+static const char *const TIP_HOLD[]   = { "REST A FINGER ON THE GLASS", "FOR A FEW SECONDS. A", "TRUBBLE THAT TRUSTS YOU", "ROLLS OVER AND STAYS. FEED", "FIRST: A HUNGRY ONE WON'T.", NULL };
+static const char *const TIP_GROW[]   = { "TRUBBLES GROW WITH TIME,", "SLOWER WHEN THE POD IS", "IN SLEEP MODE.", NULL };
+static const char *const TIP_CHANGE[] = { "PERSONALITIES WILL", "NATURALLY DRIFT AS THEY", "INTERACT WITH THE WORLD.", NULL };   /* Strato: intentionally vague */
+static const char *const TIP_GRASS[]  = { "MOSS REGROWS ON ITS OWN,", "FASTEST WHILE THE POD", "SLEEPS.", NULL };
+static const char *const TIP_CONTENT[] = { "A TRUBBLE GROWS CONTENT", "WHEN IT IS FED, STROKED", "AND LEFT IN PEACE. A", "CONTENT FLUFF MAY BUD.", NULL };
 static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
     switch (kind) {
@@ -550,15 +580,16 @@ const char *const *progression_fry_tip(int kind) {
     case FRY_REQ_GROW:   return TIP_GROW;
     case FRY_REQ_CHANGE: return TIP_CHANGE;
     case FRY_REQ_GLASS:  return TIP_GLASS;
+    case FRY_REQ_CONTENT: return TIP_CONTENT;
     default:             return TIP_GRASS;
     }
 }
 
 /* the checklist, in words. No %f: the device's printf may be the nano one. */
-static const char *const STAGE_WORDS[4] = { "A FRY", "A JUVENILE", "AN ADULT", "AN ELDER" };
+static const char *const STAGE_WORDS[4] = { "A PIP", "A TUFT", "A FLUFF", "AN OLD FLUFF" };
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
-    if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2) return 0;
+    if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 1) return 0;
     gate_t g[CARE_GATES_MAX];
     int n = care_gates(t, g);
     for (int i = 0; i < n; i++) {
@@ -569,15 +600,15 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         switch (g[i].kind) {
         case FRY_REQ_TRUST:
             snprintf(r->title, sizeof r->title, "TRUST");
-            snprintf(r->words, sizeof r->words, "ALL FISH MUST HAVE TRUST");
+            snprintf(r->words, sizeof r->words, "EVERY TRUBBLE NEEDS TRUST");
             snprintf(r->words2, sizeof r->words2, "OF AT LEAST %d OUT OF 10", need);
-            if (r->met) snprintf(r->progress, sizeof r->progress, "EVERY FISH DOES");
+            if (r->met) snprintf(r->progress, sizeof r->progress, "EVERY ONE DOES");
             else { int tenths = (int)(g[i].have * 10 + 0.5f);
                    snprintf(r->progress, sizeof r->progress, "LOWEST NOW %d.%d", tenths / 10, tenths % 10); }
             break;
         case FRY_REQ_FEED:
             snprintf(r->title, sizeof r->title, "MEALS");
-            snprintf(r->words, sizeof r->words, "FEED THE FISH AT LEAST");
+            snprintf(r->words, sizeof r->words, "FEED THE POD AT LEAST");
             snprintf(r->words2, sizeof r->words2, "%d TIMES IN ALL", need);
             if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
             else snprintf(r->progress, sizeof r->progress, "%d OF %d SO FAR", have, need);
@@ -585,14 +616,14 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         case FRY_REQ_HOLD:
             snprintf(r->title, sizeof r->title, "HOLD");
             snprintf(r->words, sizeof r->words, "REST A FINGER ON THE GLASS");
-            snprintf(r->words2, sizeof r->words2, "UNTIL A FISH SWIMS TO IT");
+            snprintf(r->words2, sizeof r->words2, "UNTIL A TRUBBLE ROLLS UP");
             snprintf(r->progress, sizeof r->progress, r->met ? "DONE" : "NOT YET");
             break;
         case FRY_REQ_GROW: {
             const fish_t *f = &t->fish[t->n_fish - 1];
             snprintf(r->title, sizeof r->title, "GROW");
-            snprintf(r->words, sizeof r->words, "THE YOUNGEST FISH MUST");
-            snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? "GROW INTO AN ADULT" : "GROW INTO A JUVENILE");
+            snprintf(r->words, sizeof r->words, "THE YOUNGEST MUST");
+            snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? "GROW INTO A FLUFF" : "GROW INTO A TUFT");
             snprintf(r->progress, sizeof r->progress, "%s IS %s", f->name, STAGE_WORDS[f->stage & 3]);
             break; }
         case FRY_REQ_CHANGE: {
@@ -607,32 +638,37 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
             int pct = (int)(g[i].have * 100 + 0.5f), limit = (int)(ALGAE_DIRTY * 100 + 0.5f);
             snprintf(r->title, sizeof r->title, "GLASS");
             snprintf(r->words, sizeof r->words, "NO MORE THAN %d%%", limit);          /* Strato's words, 2026-09-16 */
-            snprintf(r->words2, sizeof r->words2, "ALGAE COVERAGE");
+            snprintf(r->words2, sizeof r->words2, "GRIME COVERAGE");
             if (r->met) snprintf(r->progress, sizeof r->progress, "CURRENTLY CLEAN ENOUGH");
             else snprintf(r->progress, sizeof r->progress, "%d%% COVERED NOW", pct);
             break; }
+        case FRY_REQ_CONTENT: {
+            snprintf(r->title, sizeof r->title, "CONTENT");
+            snprintf(r->words, sizeof r->words, "A FLUFF MUST STAY CONTENT");
+            snprintf(r->words2, sizeof r->words2, "FOR %d LIT MINUTES", need / 60);
+            bool fluff = false;
+            for (int k = 0; k < t->n_fish; k++) fluff |= t->fish[k].stage >= STAGE_ADULT;
+            if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
+            else if (!fluff) snprintf(r->progress, sizeof r->progress, "NO FLUFF YET");
+            else snprintf(r->progress, sizeof r->progress, "%d OF %d MIN", have / 60, need / 60);
+            break; }
         }
     }
-    /* and the nursery: every arrival needs grass to be born in */
-    {
-        fry_req_t *r = &out[n++];
-        memset(r, 0, sizeof *r);
-        float best = 0;
-        for (int b = 0; b < VEG_BEDS; b++) if (t->veg_growth[b] > best) best = t->veg_growth[b];
-        r->kind = FRY_REQ_GRASS; r->met = tank_nursery_bed(t) >= 0;
-        r->frac = r->met ? 1.0f : best / VEG_NURSERY;
-        snprintf(r->title, sizeof r->title, "GRASS");
-        snprintf(r->words, sizeof r->words, "ONE GRASS BED MUST GROW");
-        snprintf(r->words2, sizeof r->words2, "TALL ENOUGH TO HIDE IN");
-        if (r->met) snprintf(r->progress, sizeof r->progress, "A NURSERY BED IS READY");
-        else snprintf(r->progress, sizeof r->progress, "TALLEST BED %d%% THERE", (int)(r->frac * 100 + 0.5f));
-    }
+    /* (the nursery row - a grass bed to be born in - went with the
+       spawning: a bud needs no grass, Trubbles 2026-10-08) */
     return n;
 }
 
+float progression_bud_s(int idx) { return idx >= 0 && idx < N_FISH_MAX ? s_bud[idx] : 0; }
+void progression_set_bud(int idx, float seconds) { if (idx >= 0 && idx < N_FISH_MAX) s_bud[idx] = seconds < 0 ? 0 : seconds > BUD_CONTENT_S ? BUD_CONTENT_S : seconds; }
+int progression_bud_parent(const tank_t *t) {
+    int best = -1;
+    for (int i = 0; i < t->n_fish; i++)
+        if (t->fish[i].stage >= STAGE_ADULT && (best < 0 || s_bud[i] > s_bud[best])) best = i;
+    return best;
+}
 static bool arrival_earned(const tank_t *t) {
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX) return false;
-    if (tank_nursery_bed(t) < 0) return false;   /* no grass to be born in */
     int met, total;
     arrival_conditions(t, &met, &total);
     return met == total;
@@ -643,10 +679,10 @@ void progression_woke(tank_t *t) { if (s_arrival_pending) do_arrival(t); }
 void progression_stage_arrival(tank_t *t) { (void)t; if (!s_arrival_pending) { s_arrival_pending = true; mark_dirty(); } }
 
 void progression_fresh(tank_t *t) {
-    tank_new_population(t);          /* a new tank: two FRY, contrasting -
-                                      * the keeper watches them grow up */
-    for (int i = 0; i < N_FISH_MAX; i++) s_age[i] = 0;
-    t->tank_ms_bits = TMS_PAIR;
+    tank_new_population(t);          /* a new pod: N_FISH_START (one) FRY -
+                                      * the keeper watches it grow up */
+    for (int i = 0; i < N_FISH_MAX; i++) s_age[i] = s_bud[i] = 0;
+    t->tank_ms_bits = POP_TMS[t->n_fish];   /* (a pair's badge only for a pair) */
     for (int i = 0; i < t->n_fish; i++) { t->fish[i].ms_bits = MS_ARRIVED; apply_growth(&t->fish[i]); }
     s_arrival_pending = false; s_spawn_in = -1; s_prev_night = t->night;
     s_ravenous = false; s_ravenous_t = 0; s_gave_up = false;
@@ -683,7 +719,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
      * every later tail's defaults (see the tail comments in save_t) */
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
-    if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
+    if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 1 || sv.n_fish > N_FISH_MAX) return false;   /* (Trubbles: a pod of one is a pod) */
     if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
@@ -702,6 +738,8 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         f->ms_seen = sv.ms_seen[i] & f->ms_bits;
         f->rest_dx = s->rest_dx; f->rest_dy = s->rest_dy;
         f->drift_acc = sv.drift_acc[i];
+        if (sv.chatty[i] > 0) f->chatty = sv.chatty[i];
+        s_bud[i] = sv.bud_s[i] < 0 ? 0 : sv.bud_s[i] > BUD_CONTENT_S ? BUD_CONTENT_S : sv.bud_s[i];
         s_age[i] = s->age_s;
         t->n_fish = i + 1;
         if (sv.names[i][0]) { sv.names[i][FISH_NAME_MAX] = 0; tank_set_name(t, i, sv.names[i]); }
@@ -832,15 +870,18 @@ void progression_tick(tank_t *t, float dt) {
         float pressure = 0;                                   /* what the traits WANTED to move, before the clamps */
         if (f->stress > 7) { f->bold = clampf(f->bold - k, 0.05f, 0.95f); pressure += k; }
         else if (f->hunger < 4 && f->stress < 2) { f->bold = clampf(f->bold + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
-        if (f->goal.id == GOAL_FOLLOW_FRIEND) { f->sociable = clampf(f->sociable + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
+        if (f->goal.id == GOAL_CUDDLE) { f->sociable = clampf(f->sociable + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
         else if (f->goal.id == GOAL_EXPLORE) { f->sociable = clampf(f->sociable - k * 0.2f, 0.05f, 0.95f); pressure += k * 0.2f; }
         f->drift_acc += pressure;
         if (fabsf(f->bold - f->bold0) >= 0.11f || fabsf(f->sociable - f->sociable0) >= 0.11f) changed_someone = true;
 
-        /* milestones: firsts the fish chose to do */
-        if (f->goal.id == GOAL_DART_PLAY && f->goal_age > 1.0f) set_ms(f, MS_FIRST_DART);
-        if (f->goal.id == GOAL_VISIT_BUBBLES && tank_dist(f->x, f->y, t->bubble_x, t->bubble_y) < 90) set_ms(f, MS_FIRST_BUBBLES);
-        if (f->goal.id == GOAL_INSPECT_REEF) {               /* its landmark: the reef cluster once there is one */
+        /* milestones: firsts the Trubble chose to do (Trubbles 2026-10-08: the
+           fish's bits kept for the saves, their badges re-skinned later -
+           first dart = first roll, first bubbles = first song, first follow =
+           first cuddle) */
+        if (f->goal.id == GOAL_ROLL && f->goal_age > 1.0f) set_ms(f, MS_FIRST_DART);
+        if (f->goal.id == GOAL_CHIRP && f->chirp_s > 1.0f) set_ms(f, MS_FIRST_BUBBLES);
+        if (f->goal.id == GOAL_EXPLORE) {                    /* its landmark: the reef cluster once there is one */
             float rx, ry; tank_reef_spot(t, &rx, &ry);
             if (tank_dist(f->x, f->y, rx, ry) < 90) {
                 set_ms(f, MS_INSPECTED);                      /* no badge (0.3.0): it reveals the curiosity slider */
@@ -850,10 +891,10 @@ void progression_tick(tank_t *t, float dt) {
         /* the seagrass: resting inside a canopy, or tucked into one while
            rattled - the grass as the place to be safe (2026-10-02, in the
            badge slot "first reef" had) */
-        if (((f->goal.id == GOAL_REST && f->goal_age > 2.0f) || f->stress >= 5.0f) && tank_in_grass(t, f->x, f->y))
+        if ((((f->goal.id == GOAL_NAP || f->goal.id == GOAL_HIDE) && f->goal_age > 2.0f) || f->stress >= 5.0f) && tank_in_grass(t, f->x, f->y))
             set_ms(f, MS_FIRST_GRASS);
-        if (f->goal.id == GOAL_FOLLOW_FRIEND && f->goal_age > 2.0f) set_ms(f, MS_FIRST_FOLLOW);
-        if (f->goal.id == GOAL_DART_PLAY) n_dart++;
+        if (f->goal.id == GOAL_CUDDLE && f->goal_age > 2.0f) set_ms(f, MS_FIRST_FOLLOW);
+        if (f->goal.id == GOAL_ROLL) n_dart++;
     }
     if (n_dart >= 2) set_tms(t, TMS_FIRST_PLAY_SESSION);
     if (changed_someone) set_tms(t, TMS_CHANGED_SOMEONE);
@@ -909,20 +950,20 @@ void progression_tick(tank_t *t, float dt) {
     t->ravenous = s_ravenous;
     t->ravenous_fed = s_ravenous && t->player_feedings != s_rav_feedings0;
 
-    /* the courtship tell: one condition shy of an arrival (or one staged),
-     * the parents-to-be pair up - tank.c stages the episodes. The pair is
-     * the one do_arrival will name (pick_parents). */
-    t->courting = false; t->court_a = t->court_b = -1;
-    if (t->n_fish < POP_CAP && t->n_fish < N_FISH_MAX && tank_nursery_bed(t) >= 0) {
-        /* ... and only with a nursery: a bed tall enough to hide in. Shave
-         * every bed and the courting stops until one regrows. */
+    /* budding (Trubbles): a fluff banks lit content time (BUD_*) */
+    for (int i = 0; i < t->n_fish; i++) {
+        const fish_t *f = &t->fish[i];
+        if (t->night || f->stage < STAGE_ADULT) continue;     /* dark: the bank holds */
+        s_bud[i] += f->content >= BUD_CONTENT ? dt : -dt * BUD_DRAIN;
+        s_bud[i] = s_bud[i] < 0 ? 0 : s_bud[i] > BUD_CONTENT_S ? BUD_CONTENT_S : s_bud[i];
+    }
+    /* the tell: one gate shy of a bud (or one staged), the fluff that would
+     * bud wobbles now and then - tank.c times the wobbles */
+    t->bud_tell = -1;
+    if (t->n_fish < POP_CAP && t->n_fish < N_FISH_MAX) {
         int met, total;
         arrival_conditions(t, &met, &total);
-        if (s_arrival_pending || met >= total - 1) {
-            int a, b;
-            pick_parents(t, &a, &b);
-            if (a >= 0 && b >= 0) { t->courting = true; t->court_a = (int8_t)a; t->court_b = (int8_t)b; }
-        }
+        if (s_arrival_pending || met >= total - 1) t->bud_tell = (int8_t)progression_bud_parent(t);
     }
 
     /* light-on: greet (the light no longer brings the fry) */
@@ -932,20 +973,34 @@ void progression_tick(tank_t *t, float dt) {
     if (light_on_edge) t->greet_timer = 6.0f;
     if (!s_arrival_pending && arrival_earned(t)) { s_arrival_pending = true; mark_dirty(); }
 
-    /* the spawning (progression.h): a staged fry is born on its own, a
-     * little after the last gate closed, while the keeper can see it. The
-     * wait counts real awake seconds (not progression_time_scale) and pauses
-     * under a page; a dance cut short (a page, the grass shaved) starts
-     * over with a fresh wait. */
-    if (!s_arrival_pending || !t->courting || t->ui_cover) {
-        if (t->spawning) s_spawn_in = -1;
-        t->spawning = false; t->spawn_danced = 0;
-    } else if (!t->spawning) {
+    /* the budding moment (tank.h BUD_*). A staged bud waits a little after
+     * its last gate - SPAWN_WAIT_MIN_S..MAX_S of lit awake seconds, paused
+     * by the dark and by a page - then for a calm moment: the parent fed,
+     * unafraid, standing on something. Then the parent stops and swells, a
+     * lump rises beside it on its roomier side, and at BUD_SPLIT_S the pip
+     * comes out there (do_arrival). With no fluff to bud from (a staged
+     * arrival from before budding) it simply arrives. */
+    if (t->bud_parent >= 0) {
+        if (!t->bud_split && t->bud_t >= BUD_SPLIT_S) {
+            if (s_arrival_pending) do_arrival(t);
+            t->bud_split = true;
+        }
+    } else if (s_arrival_pending && !t->night && !t->ui_cover) {
+        int p = progression_bud_parent(t);
         if (s_spawn_in < 0) s_spawn_in = tank_randf(t, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S);
-        if ((s_spawn_in -= dt) <= 0) { s_spawn_in = -1; t->spawning = true; t->spawn_danced = 0; }
-    } else if (t->spawn_danced >= SPAWN_DANCE_S) {
-        do_arrival(t);                       /* between them, in the fronds */
-        tank_court_puff(t, 3);
+        if ((s_spawn_in -= dt) <= 0) {
+            s_spawn_in = 0;                          /* due: waits on the calm moment */
+            if (p < 0) do_arrival(t);
+            else {
+                const fish_t *f = &t->fish[p];
+                if (f->hunger < 7 && f->stress < 5 && f->perch != PERCH_AIR && fabsf(f->vx) < 20) {
+                    float x0 = TANK_FX0, x1 = TANK_FX1;
+                    if (f->perch >= 1) tank_surface_top(f->perch, &x0, &x1);
+                    t->bud_parent = (int8_t)p; t->bud_t = 0; t->bud_split = false;
+                    t->bud_dir = f->x - x0 > x1 - f->x ? -1 : 1;   /* toward the room */
+                }
+            }
+        }
     }
 
     /* saves: coalesced event saves + heartbeat */
@@ -1008,6 +1063,7 @@ bool progression_save(tank_t *t) {
         s->eaten = f->eaten; s->eaten_player = f->eaten_player; s->ms_bits = f->ms_bits;
         sv.ms_seen[i] = f->ms_seen;
         sv.drift_acc[i] = f->drift_acc;
+        sv.chatty[i] = f->chatty; sv.bud_s[i] = s_bud[i];
     }
     if (!persist_port_save(&sv, sizeof sv)) {
         if (!s_dirty) { s_dirty = true; s_dirty_since = 0; }

@@ -79,7 +79,7 @@ float tank_glass_top(float x);                         /* the glass above x (0 i
 void  tank_glass_clamp(float *x, float *y, float m);   /* (x,y) brought to at least m px inside the glass and above the bottom */
 
 #define N_FISH_MAX 6            /* array bound; the live count is tank_t.n_fish */
-#define N_FISH_START 2          /* a new tank: two contrasting adults */
+#define N_FISH_START 1          /* a new pod: one Trubble (Trubbles brief, 2026-10-08; the fish tank began with a contrasting pair) */
 #define N_TRAINED_NAMES 4       /* name tokens the v2 model was trained on */
 #define FISH_NAME_MAX 7         /* the keeper's name for a fish (first-run setup) */
 #define LOOK_N 8                /* body / accent swatches the keeper can pick from */
@@ -177,13 +177,16 @@ int tank_algae_cells(void);                    /* the cells that are on the glas
                                                 * night's sleep films ~17% (selftest-tend;
                                                 * ~25% before 2026-09-23) */
 
+/* the Trubbles goals (model/trubbles_schema.md, in its order). The trained
+ * fish model knows none of these words, so advisor_core_init refuses it and
+ * the rules brain (advisor.c) decides until a Trubbles model is trained. */
 typedef enum {
-    GOAL_SEEK_FOOD, GOAL_FLEE_SHADOW, GOAL_VISIT_BUBBLES, GOAL_FOLLOW_FRIEND,
-    GOAL_EXPLORE, GOAL_REST, GOAL_DART_PLAY, GOAL_INSPECT_REEF,
+    GOAL_EAT, GOAL_CUDDLE, GOAL_ROLL, GOAL_NAP,
+    GOAL_EXPLORE, GOAL_GREET_KEEPER, GOAL_HIDE, GOAL_CHIRP,
     GOAL_COUNT
 } goal_id_t;
 
-extern const char *const GOAL_NAMES[GOAL_COUNT];   /* schema.md lowercase names */
+extern const char *const GOAL_NAMES[GOAL_COUNT];   /* trubbles_schema.md lowercase names */
 
 typedef enum { STAGE_FRY, STAGE_JUV, STAGE_ADULT, STAGE_ELDER } stage_t;
 extern const char *const STAGE_NAMES[4];           /* schema.md v2 stage tokens */
@@ -256,8 +259,15 @@ typedef struct {
     float turn_rate;        /* rad/s */
     /* drives, 0..10 as in the prototype (schema encoding clamps to 0..9) */
     float hunger, energy, stress, curiosity;
+    /* Trubbles drives (trubbles_schema.md), 0..10 like the rest, not saved:
+     * content rises with meals, cuddles, the keeper's strokes and calm and
+     * falls with hunger and stress; crowd is the neighbours close by plus
+     * the colony against the pod's capacity (recomputed every frame) */
+    float content, crowd;
     /* personality 0..1 (schema v2 encodes bold/sociable as 0-9) */
-    float sociable, bold, lazy;
+    float sociable, bold, lazy;  /* sociable is the schema's `cuddly` */
+    float chatty;           /* 0..1, the schema's `chatty`: from the roster slot, so a reload keeps it */
+    float chirp_s;          /* > 0: singing this frame (a chirp goal at its spot), for chorus and the notes */
     float bold0, sociable0; /* values at creation: drift is measured from here */
     stage_t stage;
     goal_t goal;
@@ -302,7 +312,16 @@ typedef struct {
      * parent_b's, bold / sociable the pair's average with a nudge. -1 = one
      * of the founding pair (or an older save). Saved per fish. */
     int8_t parent_a, parent_b;
+    /* gravity (Trubbles, 2026-10-08): a Trubble rolls along a surface, hops
+     * between surfaces and falls off edges - it never swims. Not saved: a
+     * boot drops everyone where they were. */
+    float  vx, vy;          /* px/s; speed is |vx| */
+    int8_t perch;           /* PERCH_*: what it stands on (1..N_LEDGES = ledge perch - 1) */
+    float  hop_cd;          /* s before it may hop again */
+    float  squash;          /* 1 on landing, decays: the renderer's bounce */
+    float  roll;            /* radians rolled, x / radius: the renderer's fur turn */
 } fish_t;
+enum { PERCH_AIR = -1, PERCH_FLOOR = 0, PERCH_FRIEND = 9 };
 
 /* a pellet: it sinks ~43 s from the surface to the floor, then RESTS there
  * FOOD_FLOOR_S before it dissolves (2026-09-29, for the shrimp school - every
@@ -516,23 +535,25 @@ typedef struct tank {
     bool     feed_open;            /* a feed gesture not yet eaten from (transient, not saved) */
     int      hold_approaches;      /* calm holds that drew a fish all the way in */
     float    greet_timer;          /* light-on greeting: trusting fish come up front */
-    /* courtship tell (progression.c decides, tank.c performs): when the tank
-     * is one care-condition away from earning an arrival - or one is already
-     * staged - the two most-trusting grown fish occasionally circle together
-     * near the reef. "Something is close", said in fish. */
-    bool     courting;
-    int8_t   court_a, court_b;     /* the parents-to-be (-1 = fewer than 2 grown fish) */
-    float    court_cool;           /* seconds until the next courtship episode */
-    float    court_active;         /* seconds left of the current episode */
-    /* the spawning (2026-09-24): a staged arrival is born in front of the
-     * keeper, not at a light-on. progression.c waits a few awake seconds,
-     * then sets `spawning`: the courting pair dives into the nursery grass
-     * and circles there with no episode clock; tank.c counts `spawn_danced`,
-     * the seconds both have spent circling in the fronds, and progression.c
-     * delivers the fry at SPAWN_DANCE_S. Not saved (a staged arrival is; a
-     * wake delivers it at once). */
-    bool     spawning;
-    float    spawn_danced;
+    float    keeper_s;             /* seconds since the keeper last touched the glass (schema `keeper`) */
+    float    keeper_x;             /* ... and where */
+    /* budding (Trubbles, 2026-10-08; it replaced the courtship and the
+     * spawning). progression.c decides, tank.c performs, render.c draws.
+     * The tell: while the pod is one care gate short of a bud - or one is
+     * staged - the fluff that would bud now and then wobbles with a warm
+     * glow. "Something is close", said in fur. The moment: a staged bud, its
+     * wait done and the parent calm, sets bud_parent; tank.c holds the parent
+     * still and runs bud_t through BUD_MOMENT_S (paused under a page); at
+     * BUD_SPLIT_S progression.c brings the pip out where the lump was
+     * (tank_bud_lump). None of it is saved (a staged bud is; a wake delivers
+     * it at once). */
+    int8_t   bud_tell;             /* the fluff showing the tell, -1 = none */
+    float    bud_tell_t;           /* seconds left of the current wobble */
+    float    bud_tell_cool;        /* seconds until the next */
+    int8_t   bud_parent;           /* the fluff budding now, -1 = none */
+    int8_t   bud_dir;              /* the side the lump rises on: -1 left, +1 right */
+    bool     bud_split;            /* the pip is out (the parent settles until BUD_MOMENT_S) */
+    float    bud_t;                /* seconds into the moment */
     bool     ravenous;             /* starving tank: with empty water the fish
                                     * beg at the surface; the moment pellets
                                     * land they DASH for them (feeding frenzy).
@@ -547,6 +568,8 @@ typedef struct tank {
                                     * milestones, settings, the shop) - a fry's spawning
                                     * waits, so the keeper never misses it (2026-09-24).
                                     * Set every frame; not saved. */
+    float    ambient_due;          /* seconds to the next ambient sound (TEV_AMBIENT); 0 = draw one */
+    uint32_t ambient_rng;          /* its own LCG, so t->rng's draws are untouched. Not saved. */
     uint8_t  roster_gen;           /* ticks when a fish leaves and the slots shift (tank_remove_fish):
                                     * the advisors drop what they were asked about the old slots.
                                     * Not saved. */
@@ -611,8 +634,8 @@ int   tank_add_fish(tank_t *t, int parent_a, int parent_b);
  * after it move down a slot - the order stays the order of arrival, so the
  * last fish is still the youngest - and everything the tank keeps by slot
  * moves with them (the sand dollar ledger, the others' parent slots: a child
- * of the fish that left reads "none", their spots by the reef). The courtship
- * and a spawning under way are dropped; roster_gen ticks so an advisor can
+ * of the fish that left reads "none", their spots by the reef). A bud's
+ * tell and a budding under way are dropped; roster_gen ticks so an advisor can
  * drop a decision asked for the old slots. false = no such fish. The caller
  * (progression_sell_fish) keeps the rules: who may leave, and its own
  * per-slot state. */
@@ -737,8 +760,8 @@ void  tank_scatter_food(tank_t *t, int n);      /* the tank's own trickle (rando
 void  tank_veg_bed(const tank_t *t, int b, float *x0, float *x1, float *top_y, int *fronds);
 int   tank_veg_frond(const tank_t *t, int b, int i, float *x);
 void  tank_veg_set(tank_t *t, int b, float g);
-/* the tallest bed at VEG_NURSERY or better, -1 if none (progression gates
- * courtship and arrivals on it; tank.c stages the courtship there) */
+/* the tallest bed at VEG_NURSERY or better, -1 if none (the fish's
+ * nursery; budding needs none) */
 int   tank_nursery_bed(const tank_t *t);
 /* is (x, y) inside a SEAGRASS canopy with real cover (a bed past VEG_BARE;
  * the sword plant is no grass)? progression's MS_FIRST_GRASS asks */
@@ -750,8 +773,16 @@ bool  tank_in_grass(const tank_t *t, float x, float y);
  * stands. The fish circle REEF_ORBIT_UP above the point. */
 #define REEF_ORBIT_UP 35.0f
 void  tank_reef_spot(const tank_t *t, float *x, float *y);
-/* a flirt of n bubbles rising from where the pair courts (the nursery) */
-void  tank_court_puff(tank_t *t, int n);
+/* the budding moment's timeline, seconds (tank_t.bud_*) */
+#define BUD_SWELL_S   1.5f      /* the parent stops and swells */
+#define BUD_PINCH_S   4.5f      /* the lump has grown; its neck narrows */
+#define BUD_SPLIT_S   5.0f      /* the pip is out */
+#define BUD_MOMENT_S  6.0f      /* the parent settled: over */
+#define BUD_TELL_S    2.5f      /* one wobble of the tell */
+/* the lump on a budding parent: its centre, radius and the neck's
+ * half-width (0 = pinched off). false when nobody is budding or the pip is
+ * already out. render.c draws it, progression.c brings the pip out there. */
+bool  tank_bud_lump(const tank_t *t, float *x, float *y, float *r, float *neck);
 /* the share of the glass wearing film, 0..1 (cells with any algae over all
  * cells - what the keeper sees covered, not how thick). > ALGAE_DIRTY = a
  * dirty tank: the fry checklist's GLASS gate (progression.c) */
@@ -762,6 +793,28 @@ void  tank_grow_algae(tank_t *t, int steps);
 
 /* helpers shared with advisor/render/progression */
 float tank_dist(float ax, float ay, float bx, float by);
+
+/* ---- gravity (Trubbles, 2026-10-08). The habitat pod's surfaces: the floor
+ * (the sand line, TANK_BOT - 16, from TANK_FX0 to TANK_FX1) and N_LEDGES
+ * one-way shelves in the top row of zones - a Trubble hops up through one
+ * from below and lands on it from above. */
+#define TRUB_R       17.0f      /* body radius at size 1 (15 until 2026-10-12: a little bigger) */
+#define AMBIENT_MIN_S 60.0f      /* the pod's ambience: one sound every 60-120 s of lit time (2026-10-12) */
+#define AMBIENT_MAX_S 120.0f
+#define GRAVITY      900.0f     /* px/s^2 */
+#define FLOOR_Y      (TANK_BOT - 16.0f)
+#define N_LEDGES     3
+void  tank_ledge(int i, float *x0, float *x1, float *top);   /* ledge i's span and top y */
+float tank_surface_top(int perch, float *x0, float *x1);     /* PERCH_FLOOR or 1..N_LEDGES */
+float tank_rest_y(float x, float y);                         /* the first surface top at or below (x, y) */
+#define POD_CAPACITY 8          /* the colony's most (schema: 1 to 8 Trubbles) */
+#define KEEPER_NEAR_S 4.0f      /* a touch this recent: `keeper near` */
+#define CHORUS_RANGE 160.0f     /* `mid` range: a chirp this close makes `chorus on` */
+void  tank_nook(float *x, float *y);                         /* the sleeping nook (a standing spot) */
+int   tank_hide_spot(const tank_t *t, int idx, float *x, float *y);   /* the nearest tuck-away spot */
+bool  tank_keeper_near(const tank_t *t);
+bool  tank_chorus(const tank_t *t, int idx);
+int   tank_nearest_pile(const tank_t *t, int idx, float *dist_out);    /* a member of the nearest pile of 2+ touching, or -1 */
 int   tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out);
 int   tank_nearest_friend(const tank_t *t, int fish_idx, float *dist_out);
 float tank_randf(tank_t *t, float lo, float hi);

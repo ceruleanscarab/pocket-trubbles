@@ -1,5 +1,9 @@
 # Training pipeline — from teacher to flashable binary
 
+**The Trubbles** (2026-10-09): the states come from the C sim and the steps
+differ in places - follow [retrain-trubbles.md](retrain-trubbles.md). What
+follows is pocket-tank's fish pipeline, which it builds on.
+
 The distillation loop end to end. The teacher is any Ollama-served model
 (the shipped weights were taught by gemma4:26b); set `--host` /
 `HOST` to your Ollama server (default `http://localhost:11434`).

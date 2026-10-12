@@ -1,9 +1,9 @@
 /* advisor_core.h — the platform-agnostic half of the LLM advisor: state
- * encoding (schema v2, and v3 once a v3 tokenizer is loaded), inference with
+ * encoding (model/trubbles_schema.md v1), inference with
  * the shipped 4-bit engine, and the distribution layer (sampled goal token,
  * confidence, runner-up). sim/advisor_llm.c and firmware/main/advisor_llm_esp.c
- * only add threading around this. One copy of the encoder = one place for the
- * byte-exact contract with model/gen_traces.py. */
+ * only add threading around this. The ONE copy of the encoder: the training
+ * states are written through it too (fishsim --dump-states). */
 #ifndef ADVISOR_CORE_H
 #define ADVISOR_CORE_H
 #include "tank.h"
@@ -13,15 +13,15 @@
 #include <stddef.h>
 
 /* open model + tokenizer; alloc is the run-state allocator (PSRAM on device).
- * Detects the schema from the tokenizer (a " trust" token = v3). */
+ * Refuses a tokenizer without the Trubbles goals and fields (a fish model). */
 bool advisor_core_init(const uint8_t *model_bin, size_t model_len,
                        const uint8_t *tok_bin, size_t tok_len,
                        void *(*alloc)(size_t), uint32_t seed);
-int  advisor_core_schema(void);                 /* 2 or 3; 0 if not loaded */
+int  advisor_core_schema(void);                 /* 1 (Trubbles v1); 0 if not loaded */
 const q4_config_t *advisor_core_config(void);
 q4_model_t *advisor_core_model(void);           /* for q4_model_bench */
 
-/* encode fish idx's state line per schema (no trailing " ->") */
+/* encode Trubble idx's state line per the schema (no trailing " ->") */
 void advisor_core_encode(const tank_t *t, int idx, char *out, size_t n);
 
 /* run the model on a state line. Returns the goal (id == GOAL_COUNT if the

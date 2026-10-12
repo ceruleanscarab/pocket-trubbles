@@ -23,6 +23,7 @@ enum {
     TEV_WELCOME,      /* the first-run setup opened (a fresh install / a reset) */
     TEV_WHEEL_TICK,   /* the letter wheel moved one detent */
     TEV_CONFIRM,      /* BEGIN / DONE: a setup or birth flow was completed */
+    TEV_AMBIENT,      /* a quiet sound of the pod, every AMBIENT_MIN_S..MAX_S while lit and uncovered */
     TEV_COUNT
 };
 extern const char *const TANK_EVENT_NAMES[TEV_COUNT];

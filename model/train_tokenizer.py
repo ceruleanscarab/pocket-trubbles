@@ -15,11 +15,14 @@ Encoding is a plain split-and-lookup (encode()); run.c's BPE encoder is NOT
 used - sim/advisor_llm.c and model/runw.c carry the same lookup in C, and the
 firmware will too (simpler than BPE). Training doc: <BOS> state -> goal.
 
-Usage: python3 train_tokenizer.py [--out out/tokenizer.bin] [--verify out/v2_clean.jsonl]
+Usage: python3 train_tokenizer.py                     # the Trubbles schema (model/trubbles_schema.md):
+                                                      # out/tokenizer_trubbles.bin, vocab 59
+       python3 train_tokenizer.py --schema 2 [--out out/tokenizer.bin] [--verify out/v2_clean.jsonl]
        python3 train_tokenizer.py --schema 3          # out/tokenizer_v3.bin (no names, + trust)
        python3 train_tokenizer.py --schema 4          # out/tokenizer_v4.bin (no shadow, + bored)
 The schema is chosen by --schema, or by the POCKET_SCHEMA environment variable
 when imported (train.py / probe_dist.py): POCKET_SCHEMA=3 python train.py ...
+The default (2026-10-09) is `trubbles`; 2 / 3 / 4 are pocket-tank's fish lines.
 """
 
 import argparse
@@ -31,10 +34,29 @@ import struct
 BOS_ID, EOS_ID, UNK_ID = 1, 2, 0
 SEP = " -> "
 
-SCHEMA = int(os.environ.get("POCKET_SCHEMA", "2"))
+SCHEMA = os.environ.get("POCKET_SCHEMA", "trubbles")
+SCHEMA = int(SCHEMA) if SCHEMA.isdigit() else SCHEMA
+
+# the Trubbles lexicon (model/trubbles_schema.md v1, FROZEN): the schema's
+# vocabulary table in its order - field keys, digits, the extra clock hours,
+# distances, stages, keeper, chorus, time, the goals, the separator. 56 words
+# + the 3 specials = vocab 59. The order fixes the token ids: never reorder.
+TRUBBLES_LEXICON = (
+    ["zone", "hunger", "energy", "stress", "content", "curiosity", "bored", "crowd",
+     "cuddly", "bold", "chatty", "stage", "bond", "food", "friend", "pile", "nook",
+     "keeper", "chorus", "last", "time", "urgency"]
+    + [str(i) for i in range(0, 10)] + ["10", "11", "12"]
+    + ["none", "near", "mid", "far"]
+    + ["pip", "tuft", "fluff"]
+    + ["away"] + ["on", "off"] + ["day", "night"]
+    + ["eat", "cuddle", "roll", "nap", "explore", "greet_keeper", "hide", "chirp"]
+    + ["->"])
+assert len(TRUBBLES_LEXICON) == 56 and len(set(TRUBBLES_LEXICON)) == 56
 
 
 def lexicon_for(schema):
+    if schema == "trubbles":
+        return TRUBBLES_LEXICON
     head = (["fish", "mira", "bolt", "kelp", "nori", "zone"] if schema == 2
             else ["zone"])                                   # v3: names carry no signal - dropped
     ident = (["hunger", "energy", "stress", "curiosity", "bold", "social", "stage",
@@ -56,7 +78,7 @@ def lexicon_for(schema):
 
 
 def set_schema(schema):
-    """switch the module's lexicon (v2: vocab 58, v3: vocab 54)"""
+    """switch the module's lexicon (v2: vocab 58, v3/v4: 54, trubbles: 59)"""
     global SCHEMA, LEXICON, VOCAB, VOCAB_SIZE, _WORD_TO_ID
     SCHEMA = schema
     LEXICON = lexicon_for(schema)
@@ -108,21 +130,23 @@ def verify(paths):
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=SCHEMA)
+    ap.add_argument("--schema", type=lambda v: int(v) if v.isdigit() else v, choices=(2, 3, 4, "trubbles"), default=SCHEMA)
     ap.add_argument("--out", default=None)
     ap.add_argument("--verify", default=None)
     args = ap.parse_args()
     set_schema(args.schema)
     if args.out is None:
-        args.out = os.path.join(here, "out", "tokenizer.bin" if args.schema == 2 else f"tokenizer_v{args.schema}.bin")
+        args.out = os.path.join(here, "out", "tokenizer.bin" if args.schema == 2 else
+                                "tokenizer_trubbles.bin" if args.schema == "trubbles" else f"tokenizer_v{args.schema}.bin")
     if args.verify is None:
-        args.verify = os.path.join(here, "out", f"v{args.schema}_traces*.jsonl")
+        args.verify = os.path.join(here, "out", "trubbles_traces*.jsonl" if args.schema == "trubbles" else f"v{args.schema}_traces*.jsonl")
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     write_bin(args.out)
     sample = ("fish mira zone 2 hunger 7 -> seek_food urgency 8" if args.schema == 2
+              else "zone 5 hunger 6 crowd 7 stage tuft keeper away chorus off -> cuddle urgency 6" if args.schema == "trubbles"
               else "zone 2 hunger 7 trust 5 -> seek_food urgency 8")
     assert decode(encode(sample)) == sample, "round-trip failed"
-    print(f"wrote {args.out}: schema v{args.schema}, vocab_size={VOCAB_SIZE}, sample = {len(encode(sample, bos=True))} tokens")
+    print(f"wrote {args.out}: schema {args.schema}, vocab_size={VOCAB_SIZE}, sample = {len(encode(sample, bos=True))} tokens")
     n, bad = verify(glob.glob(args.verify))
     print(f"verified {n} traces: {'closed vocabulary OK' if not bad else 'UNKNOWN WORDS ' + str(bad)}")
 

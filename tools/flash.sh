@@ -18,8 +18,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BUILD=${TANK_BUILD:-~/.cache/pocket-tank/fw-build}   # another checkout (a worktree) builds in its own dir
-PORTS=$(compgen -G '/dev/cu.usbmodem*' | sort || true)
-[ -n "$PORTS" ] || { echo "flash: no /dev/cu.usbmodem* - wake the tank (BOOT) first"; exit 1; }
+PORTS=$( (compgen -G '/dev/cu.usbmodem*'; compgen -G '/dev/ttyACM*') | sort || true)   # macOS; Linux / WSL (usbipd attach)
+[ -n "$PORTS" ] || { echo "flash: no /dev/cu.usbmodem* or /dev/ttyACM* - wake the tank (BOOT) first (WSL: usbipd attach --wsl)"; exit 1; }
 # several boards on USB: never guess (preflight also refuses a port whose
 # device does not answer as the tank's director)
 if [ -z "${TANK_PORT:-}" ] && [ "$(echo "$PORTS" | wc -l)" -gt 1 ]; then
@@ -27,7 +27,10 @@ if [ -z "${TANK_PORT:-}" ] && [ "$(echo "$PORTS" | wc -l)" -gt 1 ]; then
 fi
 export TANK_PORT=${TANK_PORT:-$PORTS}
 PORT=$TANK_PORT
-. ~/esp/esp-idf/export.sh > /dev/null 2>&1 || { echo "flash: ESP-IDF export failed"; exit 1; }
+# ESP-IDF: $IDF_EXPORT, else ~/esp/esp-idf (v5.4 - the firmware does not build on v6), else the first ~/esp/esp-idf-v*.
+# Tried in that order on purpose: `ls` would sort esp-idf-v6 before esp-idf (2026-10-12).
+if [ -z "${IDF_EXPORT:-}" ]; then for e in ~/esp/esp-idf/export.sh ~/esp/esp-idf-v*/export.sh; do [ -f "$e" ] && { IDF_EXPORT=$e; break; }; done; fi
+. "$IDF_EXPORT" > /dev/null 2>&1 || { echo "flash: ESP-IDF export failed"; exit 1; }
 [ -f firmware/keys/ota_signing_key.pem ] || { echo "flash: no firmware/keys/ota_signing_key.pem - tools/ota_key.sh (and back it up)"; exit 1; }
 python tools/preflight.py
 

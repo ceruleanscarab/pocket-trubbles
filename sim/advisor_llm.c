@@ -110,7 +110,7 @@ static int pick_next(const tank_t *t) {
         int i = (g_next + k) % t->n_fish;
         if (!g_pending[i]) continue;
         const fish_t *f = &t->fish[i];
-        bool urgent = f->hunger > 8.0f && f->goal.id != GOAL_SEEK_FOOD;
+        bool urgent = f->hunger > 8.0f && f->goal.id != GOAL_EAT;
         if (urgent) return i;
     }
     for (int k = 0; k < t->n_fish; k++) {

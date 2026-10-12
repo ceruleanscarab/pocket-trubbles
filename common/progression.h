@@ -87,18 +87,15 @@ extern float progression_time_scale;
 /* debug: stage and show an arrival now (sim key R); no-op at the cap */
 void progression_force_arrival(tank_t *t);
 /* debug: stage an arrival as if its last gate had just closed - the
- * spawning follows (or progression_force_arrival, at once) */
+ * budding follows (or progression_force_arrival, at once) */
 void progression_stage_arrival(tank_t *t);
-/* the spawning (2026-09-24, Strato: "new fry comes at next light on" felt
- * unintuitive - there's no real need to turn the light on or off): once an
- * arrival is staged, SPAWN_WAIT_MIN_S..SPAWN_WAIT_MAX_S awake seconds pass
- * (not at once), then the courting pair swims down into the nursery grass;
- * after SPAWN_DANCE_S of circling there together the fry is born between
- * them. Lit or dark. The wait and the dance hold while a page covers the
- * tank (tank_t.ui_cover) or no bed is tall enough to be born in. */
+/* a staged bud's wait (Trubbles, 2026-10-08; the names are the spawning's,
+ * which budding replaced): SPAWN_WAIT_MIN_S..SPAWN_WAIT_MAX_S lit awake
+ * seconds after the last gate - held by the dark and by a page over the pod
+ * (tank_t.ui_cover) - then a calm moment, then the budding moment itself
+ * (tank.h BUD_*: the pip is out BUD_SPLIT_S later). */
 #define SPAWN_WAIT_MIN_S  8.0f
-#define SPAWN_WAIT_MAX_S 20.0f   /* + the swim down: the courtship starts within ~30 s */
-#define SPAWN_DANCE_S    10.0f
+#define SPAWN_WAIT_MAX_S 20.0f
 /* the device woke (a deep-sleep boot, or the grace's quick wake): a staged
  * fry that missed its live birth is born now, in the grass */
 void progression_woke(tank_t *t);
@@ -149,8 +146,21 @@ void progression_ack_milestones(tank_t *t);
  * progress phrase (where it stands), a 0..1 fraction and whether it is met. Returns the count, 0 at the
  * population cap. *staged = every gate is met and the fry is on its way
  * (the spawning). Strings fit the pixel font: <= 25 chars at scale 2. */
-enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, FRY_REQ_GRASS, FRY_REQ_GLASS };
+enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, FRY_REQ_GRASS, FRY_REQ_GLASS,
+       FRY_REQ_CONTENT };
 #define FRY_REQ_MAX 5
+/* budding (Trubbles, 2026-10-08; trubbles_schema.md: "sustained high
+ * content in a full fluff triggers budding"). A new Trubble buds from one
+ * parent, not a pair: a fluff (adult or elder) banks lit seconds at content
+ * >= BUD_CONTENT, losing them at BUD_DRAIN of the rate below it, and
+ * BUD_CONTENT_S banked is the CONTENT care gate. The fluff with the most is
+ * the parent. Saved (the Trubbles tail). */
+#define BUD_CONTENT    8.0f
+#define BUD_CONTENT_S  600.0f
+#define BUD_DRAIN      0.25f
+float progression_bud_s(int idx);           /* seconds banked by Trubble idx */
+int   progression_bud_parent(const tank_t *t);   /* the fluff with the most banked, or -1 */
+void  progression_set_bud(int idx, float seconds);   /* director / tests */
 typedef struct {
     int   kind;
     char  title[12];

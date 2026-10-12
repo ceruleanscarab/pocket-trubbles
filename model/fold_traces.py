@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fold raw trace files into one clean training set. Stdlib only.
 
+  python3 fold_traces.py out/trubbles_traces_*.jsonl --out out/trubbles_clean.jsonl   # the Trubbles (default)
   python3 fold_traces.py --schema 3 out/v3_traces_*.jsonl --out out/v3_clean.jsonl
 
 - drops malformed lines and any line with a word outside the schema's closed
@@ -24,7 +25,7 @@ import train_tokenizer as tok  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+", help="raw jsonl files or globs")
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=3)
+    ap.add_argument("--schema", type=lambda v: int(v) if v.isdigit() else v, choices=(2, 3, 4, "trubbles"), default="trubbles")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     tok.set_schema(args.schema)
@@ -33,7 +34,7 @@ def main():
     paths = [p for g in args.inputs for p in sorted(glob.glob(g))]
     if not paths:
         sys.exit("no input files")
-    seen, kept, bad_vocab, bad_json, dups = set(), [], 0, 0, 0
+    seen, kept, bad_vocab, bad_json, dups, impossible = set(), [], 0, 0, 0, 0
     goals = {}
     for path in paths:
         with open(path) as fh:
@@ -50,6 +51,14 @@ def main():
                 if any(w not in words for w in (state + " " + goal).split()):
                     bad_vocab += 1
                     continue
+                if args.schema == "trubbles":
+                    # the schema's hard rules: a teacher answer that breaks one is a
+                    # teacher error, not a preference - dropped, and counted
+                    g0 = goal.split()[0]
+                    if (g0 == "eat" and " food none " in state + " ") or \
+                       (g0 == "cuddle" and " friend none " in state + " " and " pile none " in state + " "):
+                        impossible += 1
+                        continue
                 key = (state, goal)
                 if key in seen:
                     dups += 1
@@ -63,11 +72,17 @@ def main():
             out.write(json.dumps(o) + "\n")
     n = len(kept)
     print(f"{len(paths)} files -> {n} clean pairs -> {args.out}")
-    print(f"  dropped: {bad_json} malformed, {bad_vocab} off-vocabulary, {dups} exact duplicates")
+    print(f"  dropped: {bad_json} malformed, {bad_vocab} off-vocabulary, {dups} exact duplicates"
+          + (f", {impossible} impossible (eat with no food / cuddle alone)" if args.schema == "trubbles" else ""))
     print("  goal distribution:")
     for g, c in sorted(goals.items(), key=lambda kv: -kv[1]):
         flag = "  <-- check the prompt (v2 incident was 45%)" if c / n > 0.40 else ""
         print(f"    {g:14s} {c:6d}  {100 * c / n:4.1f}%{flag}")
+    if args.schema == "trubbles":
+        rut = sum(1 for o in kept if any(f" bored {d} " in o["state"] for d in "789")
+                  and o["goal"].split()[0] == o["state"].split(" last ")[1].split()[0])
+        print(f"  bored 7-9 that REPEAT last: {rut} (the teacher should rarely do this)")
+        return
     if args.schema >= 4:
         bored = sum(1 for o in kept if any(f" bored {d} " in o["state"] for d in "6789"))
         rut = sum(1 for o in kept if any(f" bored {d} " in o["state"] for d in "789")

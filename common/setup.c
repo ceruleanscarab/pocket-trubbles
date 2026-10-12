@@ -30,6 +30,10 @@ static int  s_fish;            /* birth flow: the newborn's slot */
 static int  s_birth_offered = -1;   /* setup_poll_birth: the arrival already opened for (-1 = none since boot) */
 static int  s_page;
 static int  s_slot;            /* name pages: the slot the wheel turns */
+/* (Trubbles, 2026-10-08) a pod of one: the welcome is the lone Trubble
+ * found in the cargo bay, and the second name / look pages are skipped */
+static bool s_solo;
+static bool page_skipped(int pg) { return s_solo && (pg == SETUP_PG_NAME_B || pg == SETUP_PG_LOOK_B); }
 /* the finger (setup_touch) */
 static bool  s_down;
 static float s_px, s_py;       /* press point */
@@ -55,7 +59,8 @@ static void stage(tank_t *t);
 static void tidy_name(tank_t *t, int fish);
 
 void setup_begin(tank_t *t) {
-    if (t->n_fish < 2) { progression_setup_done(t); s_active = false; return; }   /* nothing to name */
+    if (t->n_fish < 1) { progression_setup_done(t); s_active = false; return; }   /* nothing to name */
+    s_solo = t->n_fish == 1;
     s_active = true; s_birth = false; s_place = false; s_rename = false; s_fish = -1; s_page = SETUP_PG_WELCOME; s_slot = 0; s_down = false;
     tank_emit(TEV_WELCOME, -1);
 }
@@ -351,12 +356,13 @@ void setup_activate(tank_t *t, int id) {
             if (s_birth) progression_newborn_done(t); else progression_setup_done(t);
             return;
         }
-        s_page++; s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
+        do s_page++; while (page_skipped(s_page));
+        s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
         return;
     }
     if (id == SETUP_HIT_BACK) {
         if (page_is_name()) tidy_name(t, page_fish());
-        if (s_page > first_page()) s_page--;
+        if (s_page > first_page()) do s_page--; while (page_skipped(s_page));
         s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
         return;
     }
@@ -426,6 +432,7 @@ static void nav(uint16_t *fb, int stride, bool top, const char *next_label, bool
 static void dots(uint16_t *fb, int stride, int y) {
     if (s_place || s_rename) return;                    /* one page: nothing to count */
     int n = s_birth ? SETUP_BIRTH_PAGES : SETUP_PG_N, cur = s_page - first_page();
+    if (!s_birth && s_solo) { n -= 2; if (s_page > SETUP_PG_LOOK_B) cur -= 2; }   /* the skipped pair's pages */
     int w = n * 10 - 4, x0 = (PAGE_W - w) / 2;
     for (int i = 0; i < n; i++) render_rect(fb, stride, x0 + i * 10, y, 6, 3, i == cur ? C_EDGE : C_DIM);
 }
@@ -452,12 +459,13 @@ static void chevron(uint16_t *fb, int stride, int cx, int y, bool up, uint32_t r
         render_rect(fb, stride, cx + i * 4, yy, 4, 4, rgb);
     }
 }
-/* a small sword leaf for the depth tiles: `h` px tall on the spine x, the
- * plant's own lanceolate taper (widest at 40% up) in its yellow-green */
+/* a small fern frond for the depth tiles (Trubbles; it was a sword leaf):
+ * `h` px tall on the spine x, leaflets on alternate 2 px bands, tapering to
+ * the tip, in the fern's green */
 static void leaf_glyph(uint16_t *fb, int stride, int cx, int y_bot, int h, uint32_t rgb) {
     for (int i = 0; i < h; i++) {
         float u = i / (float)(h - 1);
-        float half = 0.6f + 4.4f * (u < 0.4f ? u / 0.4f : (1 - u) / 0.6f);
+        float half = 0.6f + ((i / 2) & 1 ? 3.8f : 1.4f) * (1 - u) * (u < 0.12f ? u / 0.12f : 1);
         int w = (int)(half * 2 + 0.5f); if (w < 1) w = 1;
         render_rect(fb, stride, cx - w / 2, y_bot - i, w, 1, rgb);
     }
@@ -487,14 +495,16 @@ static void cluster_glyph(uint16_t *fb, int stride, int cx, int y_bot, const clu
     render_rect(fb, stride, cx - 4, y_bot - 12, 12, 8, sc->brain); render_rect(fb, stride, cx - 2, y_bot - 14, 8, 2, sc->brain);
 }
 static void castle_glyph(uint16_t *fb, int stride, int cx, int y_bot, uint32_t wall, uint32_t roof) {
-    const uint32_t tower = 0x87795f, dark = 0x0b1a22, trim = 0xc25f38;
+    /* (Trubbles) the cargo crates in little: two olive stacks with orange
+       crates on top, a crate across, the loading gap with its hazard stripe */
+    const uint32_t tower = 0x636d40, dark = 0x07090c, seam = 0x272c19;
     render_rect(fb, stride, cx - 14, y_bot - 14, 29, 15, wall);
-    for (int x = cx - 14; x + 2 <= cx + 14; x += 6) render_rect(fb, stride, x, y_bot - 17, 3, 3, wall);
     render_rect(fb, stride, cx - 21, y_bot - 24, 8, 25, tower);
-    for (int i = 0; i < 7; i++) render_rect(fb, stride, cx - 17 - i / 2, y_bot - 31 + i, 1 + i, 1, roof);
+    render_rect(fb, stride, cx - 20, y_bot - 30, 6, 6, roof);
     render_rect(fb, stride, cx + 13, y_bot - 20, 8, 21, tower);
-    for (int i = 0; i < 6; i++) render_rect(fb, stride, cx + 17 - i / 2, y_bot - 26 + i, 1 + i, 1, roof);
-    render_rect(fb, stride, cx - 5, y_bot - 9, 11, 1, trim);
+    render_rect(fb, stride, cx + 14, y_bot - 25, 6, 5, roof);
+    render_rect(fb, stride, cx - 21, y_bot - 12, 8, 1, seam); render_rect(fb, stride, cx + 13, y_bot - 10, 8, 1, seam);
+    for (int k = 0; k < 11; k++) render_rect(fb, stride, cx - 5 + k, y_bot - 9, 1, 1, (k / 2) & 1 ? 0x26262a : 0xf2c33a);
     render_rect(fb, stride, cx - 3, y_bot - 8, 7, 9, dark);
     render_rect(fb, stride, cx - 4, y_bot - 6, 9, 7, dark);
 }
@@ -506,12 +516,12 @@ static void castle_glyph(uint16_t *fb, int stride, int cx, int y_bot, uint32_t w
  * FRONT: the leaves, the castle over them (its depths mean the plant layer) */
 static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int z, int item, float clock) {
     const int cx = x + w / 2, cy = y + h / 2, lh = h - 6, yb = y + h - 3;
-    const uint32_t la = 0x8dbb48, lb = 0x6c9d38;
+    const uint32_t la = 0x4f9a52, lb = 0x3e8546;     /* the tall fern's greens */
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
     if (item == 2) {
-        if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+        if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0x7f8a55, 0xe0803a);
         leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
-        if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+        if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0x7f8a55, 0xe0803a);
         return;
     }
     if (item == 4) {                                    /* the cluster: the same three readings as the coral's */
@@ -557,23 +567,30 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + 36, 3, C_TEXT, "WELCOME");
         static const char *const ls[] = {
-            "TWO FRY HAVE MOVED IN.",
+            "TWO PIPS HAVE MOVED IN.",
             "THEY EAT, PLAY, REST AND",
             "GROW UP WHILE YOU WATCH.",
             "EACH ONE THINKS FOR ITSELF.",
             "FIRST, LET'S MEET THEM.",
         };
-        lines_c(fb, stride, SETUP_Y + 96, 24, C_CAPT, ls, 5);
+        static const char *const solo[] = {        /* the keeper's own words for it (2026-10-08) */
+            "YOU FIND A LONE TRUBBLE",
+            "IN THE CARGO BAY.",
+            "IT EATS, ROLLS AND NAPS,",
+            "AND THINKS FOR ITSELF.",
+            "FIRST, LET'S MEET IT.",
+        };
+        lines_c(fb, stride, SETUP_Y + 96, 24, C_CAPT, s_solo ? solo : ls, 5);
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "NEXT", 2);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else if (s_page == SETUP_PG_BUBBLES) {
         /* the live tank with a stripe down the column: drag it anywhere */
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, "PLACE THE BUBBLES");
+        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, "PLACE THE AIR VENT");
         nav(fb, stride, true, "NEXT", false);
         int bx = (int)t->bubble_x - PAGE_X;
         render_rect_blend(fb, stride, bx - 22, SETUP_TOP_BTN_Y + SETUP_BTN_H + 10, 44, FLOOR - (SETUP_TOP_BTN_Y + SETUP_BTN_H + 10), C_EDGE, 46);
         chevron(fb, stride, bx, FLOOR - 34, true, C_EDGE);
-        text_c(fb, stride, CX, 296, 2, C_CAPT, "DRAG THEM LEFT OR RIGHT");
+        text_c(fb, stride, CX, 296, 2, C_CAPT, "DRAG IT LEFT OR RIGHT");
         dots(fb, stride, PAGE_H - 14);
     } else if (s_page == SETUP_PG_PLACE) {
         /* the live tank with a stripe over the piece's footprint: drag it
@@ -590,9 +607,9 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         /* the DEPTH bar: one outlined box, three joined segments, the chosen
            one lit; a picture tile on each and the word under it */
         static const char *const zl[DECOR_Z_N] = { "BEHIND", "AMONG", "IN FRONT" };
-        static const char *const hint[DECOR_Z_N] = { "THE FISH SWIM IN FRONT OF IT", "THE FISH SWIM THROUGH IT", "THE FISH SWIM BEHIND IT" };
+        static const char *const hint[DECOR_Z_N] = { "TRUBBLES PASS IN FRONT OF IT", "TRUBBLES PASS THROUGH IT", "TRUBBLES PASS BEHIND IT" };
         static const char *const castle_hint[DECOR_Z_N] = { "THE PLANTS GROW IN FRONT OF IT", "", "IT STANDS IN FRONT OF THE PLANTS" };
-        static const char *const coral_hint[DECOR_Z_N] = { "BEHIND THE GRASS AND THE FISH", "", "IN FRONT OF EVERYTHING" };
+        static const char *const coral_hint[DECOR_Z_N] = { "BEHIND THE MOSS AND TRUBBLES", "", "IN FRONT OF EVERYTHING" };
         int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);
         int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (PAGE_W - bw) / 2;   /* the item's own depths */
         text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "DEPTH");
@@ -657,7 +674,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
+        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR TRUBBLE" : s_birth ? "NAME THE NEW PIP" : s_solo ? "NAME YOUR TRUBBLE" : page_fish() == 0 ? "NAME THE FIRST TRUBBLE" : "NAME THE SECOND TRUBBLE");
         if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
         const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
         int n = name_len(f);
@@ -694,7 +711,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
         render_rect_blend(fb, stride, -PAGE_X, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
+        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR TRUBBLE" : s_birth ? "NAME THE NEW PIP" : s_solo ? "NAME YOUR TRUBBLE" : page_fish() == 0 ? "NAME THE FIRST TRUBBLE" : "NAME THE SECOND TRUBBLE");
         nav(fb, stride, true, s_rename ? "DONE" : "NEXT", s_rename);
         int n = name_len(f);
         if (s_slot > n) s_slot = n;
@@ -747,11 +764,13 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         fish_ring(fb, stride, f, r, f->color);
         fish_ring(fb, stride, f, r + 8, C_EDGE);
         render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, 116, C_PANEL, 150);
-        text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
+        text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW PIP!");
         char l1[FISH_NAME_MAX * 2 + 24];
-        snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
+        bool bud = f->parent_a >= 0 && f->parent_a == f->parent_b;   /* (Trubbles: one parent) */
+        if (bud) snprintf(l1, sizeof l1, "BUDDED FROM %s", fish_name(t, f->parent_a));
+        else snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
         text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
-        text_c(fb, stride, CX, 162, 2, C_CAPT, "DOWN IN THE GRASS.");
+        text_c(fb, stride, CX, 162, 2, C_CAPT, bud ? "RIGHT BESIDE IT." : "DOWN IN THE MOSS.");
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
         dots(fb, stride, PAGE_H - 14);
@@ -779,7 +798,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "MARKINGS");
         render_rect(fb, stride, vx, y - 1, 16, 16, f->accent); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
         text_named(fb, stride, vx + 24, y, "FROM ", nb, cb, NULL);
-        static const char *const TRAIT[2] = { "BOLD", "SOCIAL" };
+        static const char *const TRAIT[2] = { "BOLD", "CUDDLY" };   /* (sociable is the schema's cuddly) */
         for (int k = 0; k < 2; k++) {                                /* the fry's own bar, the parents' ticks */
             y += SETUP_FAM_ROW_DY;
             float v = k ? f->sociable : f->bold;
@@ -796,24 +815,34 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             }
         }
         y += SETUP_FAM_ROW_DY;
-        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "PARENTS");
+        bool bud = pa && pa == pb;                                  /* (Trubbles: a bud has one parent) */
+        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, bud ? "PARENT" : "PARENTS");
         render_text(fb, stride, vx, y, 2, ca, na);
-        render_text(fb, stride, vx + render_text_w(na, 2) + 16, y, 2, cb, nb);
+        if (!bud) render_text(fb, stride, vx + render_text_w(na, 2) + 16, y, 2, cb, nb);
         nav(fb, stride, false, "DONE", true);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else {                                                        /* SETUP_PG_CARE */
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 22, 3, C_TEXT, "CARING FOR THEM");
+        text_c(fb, stride, CX, SETUP_Y + 22, 3, C_TEXT, s_solo ? "CARING FOR IT" : "CARING FOR THEM");
         static const char *const ls[] = {
-            "TAP THE SURFACE TO FEED",
+            "TAP THE TOP TO DROP FOOD",
             "HOLD A FINGER AND THEY VISIT",
-            "TAP A FISH TO CHECK ON IT",
-            "DRAG THE GLASS TO WIPE ALGAE",
-            "SWIPE ACROSS GRASS TO TRIM",
+            "TAP ONE TO CHECK ON IT",
+            "DRAG THE GLASS TO WIPE GRIME",
+            "SWIPE ACROSS MOSS TO TRIM",
             "TWO TAPS FLIP THE LIGHT",
             "THEY CHOOSE. YOU CARE.",
         };
-        lines_c(fb, stride, SETUP_Y + 66, 24, C_CAPT, ls, 7);
+        static const char *const solo[] = {
+            "TAP THE TOP TO DROP FOOD",
+            "HOLD A FINGER AND IT VISITS",
+            "TAP IT TO CHECK ON IT",
+            "DRAG THE GLASS TO WIPE GRIME",
+            "SWIPE ACROSS MOSS TO TRIM",
+            "TWO TAPS FLIP THE LIGHT",
+            "IT CHOOSES. YOU CARE.",
+        };
+        lines_c(fb, stride, SETUP_Y + 66, 24, C_CAPT, s_solo ? solo : ls, 7);
         nav(fb, stride, false, "BEGIN", true);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);
     }

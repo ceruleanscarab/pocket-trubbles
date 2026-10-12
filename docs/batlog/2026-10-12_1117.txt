@@ -1,0 +1,24 @@
+# pocket-tank preflight 2026-10-12_1117 on /dev/ttyACM0
+I (217266) display: fb mid 0x10e4 corner 0x0000 | scene mid 0x10I (242925) batlog: 8 samples (h:mm since the first | SoC | VBAT | bright | state | mA since previous)
+I (242926) batlog:     0:00 |  81% | 3960 mV |   0 | asleep | bed
+I (242930) batlog:     4:20 |  80% | 4032 mV | 255 | asleep | sleep     0.5 mA
+I (242936) batlog:     4:25 |  82% | 4094 mV |   0 | asleep | nap     -49.7 mA
+I (242943) batlog:     4:25 |  82% | 4094 mV | 255 | awake  | boot
+I (242950) batlog:     4:26 |  82% | 3950 mV | 255 | asleep | sleep     0.0 mA
+I (242956) batlog:     4:26 |  82% | 4066 mV |   0 | asleep | nap       0.0 mA
+I (242963) batlog:     4:27 |  83% | 3995 mV | 255 | asleep | sleep  -110.8 mA
+I (242970) batlog:     4:27 |  83% | 4027 mV |   0 | asleep | nap       0.0 mA
+I (242977) batlog:   awake:  0.0 h, 0 mAh -> 0 mA average
+I (242982) batlog:   asleep: 4.4 h, -4.0 mAh -> -0.90 mA average
+I (242988) batlog:   (SoC is 1% = 2 mAh; short awake windows are coarse, a night is not)
+I (246957) director: 0 kelp   fluff age 7.0h size 0.93 hunger 4.6 energy 4.7 stress 1.3 curiosity 10.0 trust 5.4 ms 162b  roll at 303,338
+I (246958) director: pellets 0 | trickle on | ravenous 0 | day idle 50s | veg 0.03 0.03 0.03 | algae cells 29/644 | bud no | arrival -
+I (246970) director: sand dollars 78 (earned 198) | shop: plant snail | colonies 62 | 1799 cm trimmed
+I (246979) director: snail at 133,30 heading -9 deg | after cell 8 at 136,8 (film 88) | 29 cells on the glass | 191 grazed so far
+I (246991) director: bed 0 fronds (x from 19, pitch 12): 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03
+I (247002) director: bed 1 fronds (x from 376, pitch 12): 0.03 0.03 0.03 0.03 0.03
+I (247010) director: bed 2 fronds (x from 278, pitch 12): 0.03 0.03 0.03 0.03 0.03 0.03 0.03 0.03
+I (247018) director: bed 3 leaves (x from 208, pitch 14): 0.03 0.03 0.03 0.03
+I (247025) director: plant placed: centre x 229 (the default), depth AMONG the fish
+I (247032) director: nursery bed -1 (a bed >= 0.12) | parked real tank: no (this IS the real tank)
+I (247042) director: battery 84% charging, VBAT 4110 mV | brightness 255/255 (level 100%)

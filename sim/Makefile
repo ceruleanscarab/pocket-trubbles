@@ -42,7 +42,7 @@ OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(filter-out ../common/%,$(APP_SRCS)) $
 $(OUT): $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
 
-SELFTESTS := --selftest --selftest-hunger --selftest-shop --selftest-battery \
+SELFTESTS := --selftest --selftest-hunger --selftest-goals --selftest-shop --selftest-battery \
              --selftest-pop --selftest-card --selftest-sleep --selftest-tend --selftest-llm \
              --selftest-saves --selftest-update
 # the dev repo does not track model/out (the public one does): NOMODEL=1 runs

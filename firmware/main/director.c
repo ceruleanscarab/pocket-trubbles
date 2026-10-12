@@ -77,7 +77,7 @@ static bool stage_guard(tank_t *t) {
     if (nvs_has("bk")) { ESP_LOGI(TAG, "stash already parked; staging over the current tank"); return true; }
     return stash(t);
 }
-/* a courtship / arrival scene needs room under the cap: the newest fish steps
+/* a bud / arrival scene needs room under the cap: the newest fish steps
  * out of the STAGED tank (the parked one keeps it) */
 static void make_room(tank_t *t) {
     if (t->n_fish < POP_CAP && t->n_fish < N_FISH_MAX) return;
@@ -126,13 +126,13 @@ static void show_state(const tank_t *t) {
     int pellets = 0, cells = 0;
     for (int i = 0; i < MAX_FOOD; i++) pellets += t->food[i].alive;
     for (int i = 0; i < ALGAE_CELLS; i++) cells += t->algae[i] > 0;
-    ESP_LOGI(TAG, "pellets %d | trickle %s | ravenous %d | %s%s idle %.0fs | veg %.2f %.2f %.2f | algae cells %d/%d | courting %s%s%s%s | arrival %s",
+    ESP_LOGI(TAG, "pellets %d | trickle %s | ravenous %d | %s%s idle %.0fs | veg %.2f %.2f %.2f | algae cells %d/%d | bud %s%s | arrival %s",
              pellets, t->trickle_off ? "OFF" : t->autofeed_off ? "off (AUTO FEED off)" : "on", (int)t->ravenous,
              t->night ? "night" : "day", t->light_override ? " (manual)" : t->orient_lock ? " (rotation locked)" : "",
              t->idle_s,
              t->veg_growth[0], t->veg_growth[1], t->veg_growth[2], cells, ALGAE_CELLS,
-             t->courting ? t->fish[t->court_a].name : "no", t->courting ? "+" : "",
-             t->courting ? t->fish[t->court_b].name : "", t->spawning ? " (SPAWNING)" : t->court_active > 0 ? " (circling)" : "",
+             t->bud_parent >= 0 ? t->fish[t->bud_parent].name : t->bud_tell >= 0 ? t->fish[t->bud_tell].name : "no",
+             t->bud_parent >= 0 ? " (BUDDING)" : t->bud_tell_t > 0 ? " (wobbling)" : "",
              progression_arrival_pending() ? "staged" : "-");
     ESP_LOGI(TAG, "sand dollars %d (earned %d) | shop:%s%s%s%s%s%s%s%s | colonies %d | %.0f cm trimmed",
              (int)t->sd_balance, (int)t->sd_earned, t->sd_unlocks & SD_ITEM_PLANT ? " plant" : "", t->sd_unlocks & SD_ITEM_SNAIL ? " snail" : "",
@@ -199,7 +199,7 @@ static void help(void) {
     ESP_LOGI(TAG, "pmic (AXP2101 dump) | pmic on|off <aldo1|aldo2..4|bldo1|bldo2|cpusldo|dcdc2..5|dldo1|dldo2> (experiments; boot trims the unused ones) | pmic trim");
     ESP_LOGI(TAG, "bright <0-255> (panel now; not saved) | level 100|60|30 (the keeper's setting, saved)");
     ESP_LOGI(TAG, "batlog [clear] (the tank's own battery log: SoC/VBAT every 5 min awake, 30 min asleep, mA derived - read it after a night on battery) | codec (ES8311 registers) | clock (the clock: RTC chip or the internet's time, and whether tonight is a power-off) | sleepcfg [mask] (the round board's deep-sleep savings: 1 touch, 2 panel, 4 IMU, 8 QSPI held; 15 = all, the default) | deepsleep [N] (N: 5 s grace then deep sleep with an N s timer wake - one batlog window per N, BOOT wakes it; no N: the keeper's sleep, grace then power-off) | poweroff (save + PMIC cut now) | keytime [N] (N s of timing every PWR press - is a tap under the PMIC's 128 ms power-on hold?)");
-    ESP_LOGI(TAG, "overgrown (grass to the ceiling + fouled glass; fish stress climbs) | court (stage the fry: in ~10-20 s the pair courts in the grass, then it is born) | arrive (the fry, now)");
+    ESP_LOGI(TAG, "overgrown (grass to the ceiling + fouled glass; fish stress climbs) | bud (stage a bud: in ~10-20 s the content fluff buds) | arrive (the pip, now)");
     ESP_LOGI(TAG, "wifi (the saved network) | wifi set ssid=<name> pass=<secret> | wifi forget | ota (slots, channel) | ota check (save + restart into update mode, as CHECK FOR UPDATES) | ota url <manifest url>|default (the test channel)");
 }
 
@@ -558,13 +558,12 @@ static void run(tank_t *t, char *line) {
         tank_grow_algae(t, 600);
         ESP_LOGI(TAG, "overgrown: grass at the ceiling, glass fouled - stress settles toward ~6.7 over the next minute; swipe to trim, wipe to clean");
         show_state(t);
-    } else if (!strcmp(c, "court")) {
+    } else if (!strcmp(c, "bud")) {
         if (!stage_guard(t)) return;
         make_room(t);
-        if (tank_nursery_bed(t) < 0) { tank_veg_set(t, 0, 0.3f); ESP_LOGI(TAG, "no nursery: reef bed set to 0.30"); }
         progression_stage_arrival(t);
-        ESP_LOGI(TAG, "arrival staged: in %.0f-%.0f s the parents swim down into the nursery grass and court; the fry is born after %.0f s of circling there together (a page up pauses it; `arrive` = now)",
-                 SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S, SPAWN_DANCE_S);
+        ESP_LOGI(TAG, "bud staged: in %.0f-%.0f lit s, at a calm moment, the content fluff swells and the pip pinches off %.0f s later (dark or a page up holds it; `arrive` = now)",
+                 SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S, BUD_SPLIT_S);
     } else if (!strcmp(c, "arrive")) {
         if (!stage_guard(t)) return;
         make_room(t);

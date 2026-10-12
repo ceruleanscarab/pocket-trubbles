@@ -7,14 +7,14 @@
 
 static q4_model_t *g_model;
 static word_tok_t  g_tok;
-static int   g_schema;                /* 2 | 3 | 4 */
+static int   g_schema;                /* the Trubbles schema version: 1 */
 static int   g_goal_ids[GOAL_COUNT];  /* token id of each goal word */
 static uint32_t g_rng = 0x9E3779B9u;
 static float g_last_p[GOAL_COUNT];
 bool  advisor_core_sample = true;
 float advisor_core_temp   = 1.0f;
 
-/* ---- schema.md state encoding: must match model/gen_traces.py exactly ---- */
+/* ---- trubbles_schema.md state encoding ---- */
 #define SCHEMA_NEAR 70.0f
 #define SCHEMA_MID  180.0f
 #define SCHEMA_FAR  380.0f
@@ -25,8 +25,12 @@ static const char *bucket(float d) {
     if (d < SCHEMA_FAR)  return "far";
     return NULL;
 }
+/* the clock position of (ox, oy) as the Trubble sees it: MIRRORED by the way
+   it faces, not rotated - a side-view creature turns by flipping, so 12 is
+   straight ahead, 3 below, 6 behind and 9 above whichever way it faces (a
+   rotation by the heading, the fish's way, put "below" at 9 facing left) */
 static int clock_dir(const fish_t *f, float ox, float oy) {
-    float rel = atan2f(oy - f->y, ox - f->x) - f->heading;
+    float rel = atan2f(oy - f->y, (ox - f->x) * (f->facing < 0 ? -1.0f : 1.0f));
     while (rel < 0) rel += 6.2831853f;
     int hour = (int)(rel / 6.2831853f * 12.0f + 0.5f) % 12;
     return hour == 0 ? 12 : hour;
@@ -38,65 +42,37 @@ static void sighting(const fish_t *f, float ox, float oy, bool present, char *ou
 }
 static int drive9(float v) { return v < 0 ? 0 : v > 9 ? 9 : (int)v; }
 
+/* the Trubbles state line (model/trubbles_schema.md v1, FROZEN): fixed field
+ * order, one word per token. The only encoder - the trace generator reads
+ * what `fishsim --dump-states` writes through this same function. Clock
+ * positions are relative to the way the Trubble faces (12 = straight ahead,
+ * 3 = below, 9 = above, 6 = behind: heading is 0 facing right, pi facing
+ * left), distances bucketed near / mid / far as the fish's were. */
 void advisor_core_encode(const tank_t *t, int idx, char *out, size_t n) {
     const fish_t *f = &t->fish[idx];
-    int col = (int)(f->x / (TANK_W / 3.0f)); if (col > 2) col = 2;
-    int row = (int)(f->y / (TANK_BOT / 2.0f)); if (row > 1) row = 1;
+    int col = (int)(f->x / (TANK_W / 3.0f)); if (col > 2) col = 2; if (col < 0) col = 0;
+    int row = (int)(f->y / (TANK_BOT / 2.0f)); if (row > 1) row = 1; if (row < 0) row = 0;
 
-    char food_s[24], shadow_s[24], friend_s[40], bubble_s[24], reef_s[24], wall_s[24], frs[24];
+    char food_s[24], friend_s[24], pile_s[24], nook_s[24];
     float fd; int fi = tank_nearest_food(t, f, &fd);
     sighting(f, fi >= 0 ? t->food[fi].x : 0, fi >= 0 ? t->food[fi].y : 0, fi >= 0, food_s, sizeof food_s);
-    /* the shadow was removed from the game (2026-09-13); the field stays in
-     * the frozen schema and always reads `none` (the model was trained on
-     * plenty of shadow-none states) */
-    snprintf(shadow_s, sizeof shadow_s, "none");
     int fr = tank_nearest_friend(t, idx, NULL);
-    sighting(f, fr >= 0 ? t->fish[fr].x : 0, fr >= 0 ? t->fish[fr].y : 0, fr >= 0, frs, sizeof frs);
-    if (strcmp(frs, "none") == 0) snprintf(friend_s, sizeof friend_s, "none");
-    else if (g_schema >= 3) snprintf(friend_s, sizeof friend_s, "%s", frs);            /* v3: no names */
-    else snprintf(friend_s, sizeof friend_s, "%s %s", t->fish[fr].model_name, frs);
-    sighting(f, t->bubble_x, t->bubble_y, true, bubble_s, sizeof bubble_s);
-    { float rx, ry; tank_reef_spot(t, &rx, &ry);   /* the cluster once the keeper owns one, else the grass corner's spot */
-      sighting(f, rx, ry, true, reef_s, sizeof reef_s); }
+    sighting(f, fr >= 0 ? t->fish[fr].x : 0, fr >= 0 ? t->fish[fr].y : 0, fr >= 0, friend_s, sizeof friend_s);
+    int pl = tank_nearest_pile(t, idx, NULL);
+    sighting(f, pl >= 0 ? t->fish[pl].x : 0, pl >= 0 ? t->fish[pl].y : 0, pl >= 0, pile_s, sizeof pile_s);
+    { float nx, ny; tank_nook(&nx, &ny); sighting(f, nx, ny, true, nook_s, sizeof nook_s); }
 
-    /* wall: nearest side, world-frame contact point, heading-relative clock */
-    /* (the glass at the fish's own height and column: the frame's edges in the rectangle, the circle in a bowl) */
-    float gx0 = tank_glass_x0(f->y), gx1 = tank_glass_x1(f->y), gy0 = tank_glass_top(f->x);
-    float dists[4] = { gx1 - f->x, f->x - gx0, TANK_BOT - f->y, f->y - gy0 };     /* 3,9,6,12 o'clock sides */
-    float wxs[4] = { gx1, gx0, f->x, f->x }, wys[4] = { f->y, f->y, TANK_BOT, gy0 };
-    int side = 0;
-    for (int i = 1; i < 4; i++) if (dists[i] < dists[side]) side = i;
-    const char *wb = bucket(dists[side]);
-    if (wb && strcmp(wb, "far") != 0)
-        snprintf(wall_s, sizeof wall_s, "%s %d", wb, clock_dir(f, wxs[side], wys[side]));
-    else snprintf(wall_s, sizeof wall_s, "clear");
-
-    int bold9 = (int)(f->bold * 9.0f + 0.5f), soc9 = (int)(f->sociable * 9.0f + 0.5f);
-    if (g_schema >= 4)
-        snprintf(out, n,
-            "zone %d hunger %d energy %d stress %d curiosity %d bold %d social %d stage %s trust %d bored %d "
-            "food %s friend %s bubble %s reef %s wall %s last %s time %s",
-            row * 3 + col + 1, drive9(f->hunger), drive9(f->energy), drive9(f->stress), drive9(f->curiosity),
-            bold9, soc9, STAGE_NAMES[f->stage], drive9(f->trust), drive9(f->bored),
-            food_s, friend_s, bubble_s, reef_s, wall_s,
-            GOAL_NAMES[f->goal.id], t->night ? "night" : "day");
-    else if (g_schema >= 3)
-        snprintf(out, n,
-            "zone %d hunger %d energy %d stress %d curiosity %d bold %d social %d stage %s trust %d "
-            "food %s shadow %s friend %s bubble %s reef %s wall %s last %s time %s",
-            row * 3 + col + 1, drive9(f->hunger), drive9(f->energy), drive9(f->stress), drive9(f->curiosity),
-            bold9, soc9, STAGE_NAMES[f->stage], drive9(f->trust),
-            food_s, shadow_s, friend_s, bubble_s, reef_s, wall_s,
-            GOAL_NAMES[f->goal.id], t->night ? "night" : "day");
-    else
-        snprintf(out, n,
-            "fish %s zone %d hunger %d energy %d stress %d curiosity %d bold %d social %d stage %s "
-            "food %s shadow %s friend %s bubble %s reef %s wall %s last %s time %s",
-            f->model_name, row * 3 + col + 1,
-            drive9(f->hunger), drive9(f->energy), drive9(f->stress), drive9(f->curiosity),
-            bold9, soc9, STAGE_NAMES[f->stage],
-            food_s, shadow_s, friend_s, bubble_s, reef_s, wall_s,
-            GOAL_NAMES[f->goal.id], t->night ? "night" : "day");
+    int cuddly9 = (int)(f->sociable * 9.0f + 0.5f), bold9 = (int)(f->bold * 9.0f + 0.5f), chatty9 = (int)(f->chatty * 9.0f + 0.5f);
+    snprintf(out, n,
+        "zone %d hunger %d energy %d stress %d content %d curiosity %d bored %d crowd %d "
+        "cuddly %d bold %d chatty %d stage %s bond %d "
+        "food %s friend %s pile %s nook %s keeper %s chorus %s last %s time %s",
+        row * 3 + col + 1, drive9(f->hunger), drive9(f->energy), drive9(f->stress), drive9(f->content),
+        drive9(f->curiosity), drive9(f->bored), drive9(f->crowd),
+        cuddly9, bold9, chatty9, STAGE_NAMES[f->stage & 3], drive9(f->trust),
+        food_s, friend_s, pile_s, nook_s,
+        tank_keeper_near(t) ? "near" : "away", tank_chorus(t, idx) ? "on" : "off",
+        GOAL_NAMES[f->goal.id < GOAL_COUNT ? f->goal.id : GOAL_EXPLORE], t->night ? "night" : "day");
 }
 
 bool advisor_core_init(const uint8_t *model_bin, size_t model_len,
@@ -105,16 +81,17 @@ bool advisor_core_init(const uint8_t *model_bin, size_t model_len,
     g_model = q4_model_open(model_bin, model_len, alloc);
     if (!g_model) return false;
     if (word_tok_init(&g_tok, tok_bin, tok_len, q4_model_config(g_model)->vocab_size) != 0) return false;
-    g_schema = 2;
+    g_schema = 1;                                    /* (a fish model is refused below: no Trubble goal words) */
     for (int i = 0; i < GOAL_COUNT; i++) g_goal_ids[i] = -1;
+    bool fields = false;
     for (int id = 0; id < g_tok.vocab_size; id++) {
         const char *p = word_tok_piece(&g_tok, id);
-        if (strcmp(p, " trust") == 0 && g_schema < 3) g_schema = 3;
-        if (strcmp(p, " bored") == 0) g_schema = 4;      /* v4: no shadow, + bored */
+        if (strcmp(p, " chorus") == 0) fields = true;    /* the Trubbles line's own field */
         for (int g = 0; g < GOAL_COUNT; g++)
             if (p[0] == ' ' && strcmp(p + 1, GOAL_NAMES[g]) == 0) g_goal_ids[g] = id;
     }
     for (int g = 0; g < GOAL_COUNT; g++) if (g_goal_ids[g] < 0) return false;   /* not our vocab */
+    if (!fields) return false;
     if (seed) g_rng = seed;
     return true;
 }

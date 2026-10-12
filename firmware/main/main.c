@@ -481,6 +481,7 @@ static int stage_pitch(int fish) {                 /* fry high, elder low */
     static const int p[4] = { 320, 282, 256, 230 };
     return p[tank.fish[fish].stage & 3];
 }
+static bool s_bat_low;                 /* (defined with the gauge's state below) */
 static void on_tank_event(int ev, int fish, void *ud) {
     (void)ud;
     switch (ev) {
@@ -497,6 +498,7 @@ static void on_tank_event(int ev, int fish, void *ud) {
     case TEV_WELCOME:     audio_port_play(SND_WELCOME, AUDIO_PITCH_ONE); break;
     case TEV_WHEEL_TICK:  audio_port_play(SND_WHEEL_TICK, AUDIO_PITCH_ONE); break;
     case TEV_CONFIRM:     audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); break;
+    case TEV_AMBIENT:     if (!s_bat_low) audio_port_play(SND_AMBIENT, AUDIO_PITCH_ONE); break;   /* no ambience on a low battery */
     default: break;
     }
 }

@@ -167,7 +167,7 @@ void render_updates_page(uint16_t *fb, int stride) {
         render_text(fb, stride, 32, 122, 2, C_CAPT, "NETWORK");
         update_text(fb, stride, 32 + render_text_w("NETWORK", 2) + 14, 122, 2, C_TEXT, ssid);
     } else render_text(fb, stride, 32, 122, 2, C_CAPT, "NO NETWORK SAVED YET");
-    render_text(fb, stride, 32, 152, 2, C_DIM, "THE TANK PAUSES FOR A MOMENT");
+    render_text(fb, stride, 32, 152, 2, C_DIM, "THE POD PAUSES FOR A MOMENT");
     render_text(fb, stride, 32, 174, 2, C_DIM, "AND COMES BACK BY ITSELF");
     render_button(fb, stride, UPD_CHECK_X, UPD_CHECK_Y, UPD_CHECK_W, UPD_CHECK_H, C_GO, C_GO_E, "CHECK FOR UPDATES", 2);
     if (net_port_creds_get(ssid, pass))
@@ -391,10 +391,10 @@ static void fail(int err) {
                                      "TRY AGAIN", ACT_RETRY_CONNECT, "TYPE IT AGAIN", ACT_RETYPE, "OTHER NETWORK", ACT_SCAN);
                             snprintf(s.line2, sizeof s.line2, "REFUSE THE FIRST TRIES. TRY AGAIN?"); break;
     case NET_ERR_NO_NET:    message("NO ANSWER", "THE UPDATE SERVER DID NOT", false, "ANSWER. IS THE INTERNET UP?", "TRY AGAIN", ACT_RETRY_CHECK, "OTHER NETWORK", ACT_SCAN); break;
-    case NET_ERR_BAD_MANIFEST: message("ODD ANSWER", "THE UPDATE SERVER SENT", false, "SOMETHING THIS TANK CANNOT READ", "TRY AGAIN", ACT_RETRY_CHECK, NULL, 0); break;
+    case NET_ERR_BAD_MANIFEST: message("ODD ANSWER", "THE UPDATE SERVER SENT", false, "SOMETHING THIS POD CANNOT READ", "TRY AGAIN", ACT_RETRY_CHECK, NULL, 0); break;
     case NET_ERR_DOWNLOAD:  message("DOWNLOAD STOPPED", "NOTHING HAS CHANGED", false, "", "TRY AGAIN", ACT_RETRY_INSTALL, NULL, 0); break;
     case NET_ERR_VERIFY:    message("NOT VERIFIED", "THE UPDATE WAS NOT SIGNED", false, "BY POCKET TANK. NOTHING CHANGED", NULL, 0, NULL, 0); break;
-    case NET_ERR_SPACE:     message("TOO BIG", "THE UPDATE DOES NOT FIT", false, "THIS TANK. NOTHING CHANGED", NULL, 0, NULL, 0); break;
+    case NET_ERR_SPACE:     message("TOO BIG", "THE UPDATE DOES NOT FIT", false, "THIS POD. NOTHING CHANGED", NULL, 0, NULL, 0); break;
     case NET_ERR_ABORTED:   message("CANCELED", "NOTHING HAS CHANGED", false, "", NULL, 0, NULL, 0); break;
     case NET_ERR_RADIO:     message("NO RADIO", "THE WI-FI RADIO DID NOT", false, "START. TRY AGAIN LATER", NULL, 0, NULL, 0); break;
     case NET_ERR_BOARD:     message("WRONG BOARD", "THIS UPDATE IS FOR", false, "ANOTHER BOARD. NOTHING CHANGED", NULL, 0, NULL, 0); break;
@@ -440,7 +440,7 @@ void update_tick(float dt) {
             s.m = *m; s.have_m = true;
             if (strcmp(m->board, PT_BOARD) != 0)            /* another board's manifest (2026-10-02): never offered */
                 message("WRONG BOARD", "THIS UPDATE IS FOR", false, "ANOTHER BOARD. NOTHING CHANGED", NULL, 0, NULL, 0);
-            else if (!newer(m)) { message("UP TO DATE", "YOUR TANK HAS THE LATEST", false, "VERSION", NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
+            else if (!newer(m)) { message("UP TO DATE", "YOUR POD HAS THE LATEST", false, "VERSION", NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
             else if (m->needs_cable || (m->min_from && m->min_from > (uint32_t)PT_RELEASE_NUM))
                 message("NEEDS THE CABLE", "THIS UPDATE IS INSTALLED", false, "FROM POCKETANK.COM/INSTALL", NULL, 0, NULL, 0);
             else go(STEP_OFFER, UPD_PG_OFFER);
@@ -502,7 +502,7 @@ int update_hit(float x, float y) {
 const char *update_hit_name(int id) {
     static char buf[24];
     switch (id) {
-    case HIT_NONE: return "none"; case HIT_BACK: return "BACK TO TANK"; case HIT_CANCEL: return "CANCEL";
+    case HIT_NONE: return "none"; case HIT_BACK: return "BACK TO POD"; case HIT_CANCEL: return "CANCEL";
     case HIT_RESCAN: return "SCAN AGAIN"; case HIT_YES: return "UPDATE"; case HIT_NO: return "NOT NOW";
     case HIT_PRIMARY: return s.primary ? s.primary : "primary"; case HIT_SECONDARY: return s.secondary ? s.secondary : "secondary";
     case HIT_TERTIARY: return s.tertiary ? s.tertiary : "tertiary";
@@ -610,7 +610,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         snprintf(line, sizeof line, "THE BATTERY IS AT %d%%", s.battery_pct);
         text_c(fb, stride, 150, 2, C_CAPT, line);
         text_c(fb, stride, 176, 2, C_DIM, "AN UPDATE NEEDS THE CABLE IN");
-        render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
+        render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO POD", 2);
         break;
     case UPD_PG_BUSY:
         text_c(fb, stride, 96, 3, C_TEXT, s.title);
@@ -624,7 +624,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
             render_rect(fb, stride, BX + 2, BY + 2, (BW - 4) * s.percent / 100, BH - 4, C_EDGE);
             snprintf(line, sizeof line, "%d%%", s.percent); text_c(fb, stride, BY + 26, 2, C_TEXT, line);
             if (s.step == STEP_RESTART) text_c(fb, stride, 252, 2, C_CAPT, "RESTARTING");
-            else text_c(fb, stride, 252, 2, C_DIM, "KEEP THE TANK ON");
+            else text_c(fb, stride, 252, 2, C_DIM, "KEEP THE POD ON");
         } else spinner(fb, stride, CX, 214, clock);
         if (s.step != STEP_RESTART) render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "CANCEL", 2);
         break;
@@ -646,7 +646,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
             for (int i = 0; i < 4; i++) { render_rect(fb, stride, cx - 3 - i * 3, UPD_ROW_Y0 + UPD_ROWS_PER * UPD_ROW_H - 30 - i * 3, 3, 3, s.list_page < pages - 1 ? C_EDGE : C_DIM); render_rect(fb, stride, cx + i * 3, UPD_ROW_Y0 + UPD_ROWS_PER * UPD_ROW_H - 30 - i * 3, 3, 3, s.list_page < pages - 1 ? C_EDGE : C_DIM); }
             for (int i = 0; i < pages; i++) render_rect(fb, stride, cx - 1, UPD_ROW_Y0 + UPD_ROWS_PER * UPD_ROW_H / 2 - pages * 4 + i * 8, 4, 4, i == s.list_page ? C_EDGE : C_DIM);
         }
-        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
+        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO POD", 2);
         render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "SCAN AGAIN", 2);
         break; }
     case UPD_PG_PASSWORD:
@@ -667,7 +667,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         if (secs < 90) snprintf(line, sizeof line, "IT TAKES ABOUT A MINUTE");
         else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
         text_c(fb, stride, 208, 2, C_DIM, line);
-        text_c(fb, stride, 230, 2, C_DIM, "THE TANK RESTARTS BY ITSELF");
+        text_c(fb, stride, 230, 2, C_DIM, "THE POD RESTARTS BY ITSELF");
         render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, "UPDATE", 2);
         render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "NOT NOW", 2);
         break; }
@@ -693,7 +693,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         if (s.primary)   render_button(fb, stride, primary_x(), by, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, s.primary, 2);
         if (s.secondary) render_button(fb, stride, UPD_BTN_R_X, by, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, s.secondary, 2);
         if (s.tertiary)  render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, s.tertiary, 2);
-        render_button(fb, stride, s.tertiary ? UPD_BTN_R_X : UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
+        render_button(fb, stride, s.tertiary ? UPD_BTN_R_X : UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO POD", 2);
         break; }
     default: break;
     }
