@@ -796,7 +796,7 @@ float tank_dist(float ax, float ay, float bx, float by);
  * (the sand line, TANK_BOT - 16, from TANK_FX0 to TANK_FX1) and N_LEDGES
  * one-way shelves in the top row of zones - a Trubble hops up through one
  * from below and lands on it from above. */
-#define TRUB_R       15.0f      /* body radius at size 1 */
+#define TRUB_R       17.0f      /* body radius at size 1 (15 until 2026-10-12: a little bigger) */
 #define GRAVITY      900.0f     /* px/s^2 */
 #define FLOOR_Y      (TANK_BOT - 16.0f)
 #define N_LEDGES     3

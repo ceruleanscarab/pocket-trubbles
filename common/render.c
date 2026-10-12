@@ -164,8 +164,8 @@ static float fast_sin(float x) {
 }
 
 static void rect_fill(ctx_t *c, int x, int y, int w, int h, uint32_t rgb);   /* below (the air vent's grille uses it) */
-/* filled convex polygon, points in world space */
-static void fill_poly(ctx_t *c, const float *xs, const float *ys, int n, uint32_t rgb) {
+/* filled convex polygon, points in world space; _a blends it at alpha */
+static void fill_poly_a(ctx_t *c, const float *xs, const float *ys, int n, uint32_t rgb, int alpha) {
     float miny = 1e9f, maxy = -1e9f;
     for (int i = 0; i < n; i++) { if (ys[i] < miny) miny = ys[i]; if (ys[i] > maxy) maxy = ys[i]; }
     src_t s = src_color(rgb, c->dim);
@@ -180,8 +180,11 @@ static void fill_poly(ctx_t *c, const float *xs, const float *ys, int n, uint32_
                 if (x > x1) x1 = x;
             }
         }
-        span(c, (int)x0, (int)x1, y, &s, 255);
+        span(c, (int)x0, (int)x1, y, &s, alpha);
     }
+}
+static void fill_poly(ctx_t *c, const float *xs, const float *ys, int n, uint32_t rgb) {
+    fill_poly_a(c, xs, ys, n, rgb, 255);
 }
 
 static uint32_t mix(uint32_t a, uint32_t b, float p) {
@@ -243,6 +246,13 @@ static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool aslee
     float bot = f->y + R, cx = f->x, cy = bot - 0.16f * R - ry;   /* standing on its feet */
     float face = f->yaw;                               /* -1 left .. +1 right */
 
+    /* fur (2026-10-12, fluffier): a cloud, not a burr - a soft halo, a ring of
+       overlapping round puffs that scallop the outline with a few fine wisps
+       poking out of it, then the body, then paler puffs straddling its upper
+       rim. All turn with the roll; shorter underneath (it sits on them) and
+       pressed in by stress. */
+    float puff = 1 - 0.6f * flat;                      /* 1 fluffed up .. 0.4 pressed flat */
+    fill_ellipse(c, cx, cy - 0.03f * R, rx * (1.06f + 0.16f * puff), ry * (1.04f + 0.16f * puff), fur, 50);
     /* feet: two little ovals under the body, stepping while it rolls,
        tucked up in a hop */
     uint32_t foot = mix(fur, 0x2a1c18, 0.70f);
@@ -253,24 +263,47 @@ static void draw_trubble_core(ctx_t *c, const fish_t *f, float clock, bool aslee
         fill_ellipse(c, cx + side * 0.38f * rx + face * 0.12f * R, bot - 0.17f * R - lift,
                      0.30f * R, 0.17f * R, foot, 255);
     }
-    /* fur: tufts round the rim, turning with the roll; shorter underneath
-       (it sits on them) and laid flat by stress */
+    uint32_t fur_deep = mix(fur, fur_dark, 0.6f);
     {
-        const int N = 22;
-        for (int i = 0; i < N; i++) {
-            float a = f->roll + i * (6.2831853f / N);
+        /* wisps: thin and see-through, swaying a little at rest */
+        float sway = sinf(clock * 1.7f + f->wander) * 0.10f * puff;
+        const int NW = 16;
+        for (int i = 0; i < NW; i++) {
+            float a = f->roll + (i + 0.5f) * (6.2831853f / NW) + 0.25f * trub_hash(i, f->preset + 23);
+            float under = clamp01((sinf(a) - 0.25f) / 0.5f);   /* +y is down */
+            float len = (0.26f + 0.16f * trub_hash(i, f->preset + 7)) * (1 - 0.85f * under) * puff;
+            float hw = 0.09f, at = a + sway + 0.15f * (trub_hash(i, f->preset + 31) - 0.5f);
+            float xs[3] = { cx + cosf(a - hw) * rx * 0.95f, cx + cosf(at) * rx * (1 + len), cx + cosf(a + hw) * rx * 0.95f };
+            float ys[3] = { cy + sinf(a - hw) * ry * 0.95f, cy + sinf(at) * ry * (1 + len), cy + sinf(a + hw) * ry * 0.95f };
+            fill_poly_a(c, xs, ys, 3, fur_deep, 170);
+        }
+        /* the outer puffs: darker, peeking past the body - the scalloped edge */
+        const int NP = 14;
+        for (int i = 0; i < NP; i++) {
+            float a = f->roll + i * (6.2831853f / NP);
             float ca = cosf(a), sa = sinf(a);
-            float under = clamp01((sa - 0.35f) / 0.5f);   /* +y is down */
-            float len = (0.16f + 0.14f * trub_hash(i, f->preset + 7)) * (1 - 0.75f * under) * (1 - 0.6f * flat);
-            float hw = 3.14159f / N * 1.15f;
-            float a0 = a - hw, a1 = a + hw;
-            float xs[3] = { cx + cosf(a0) * rx * 0.92f, cx + ca * rx * (1 + len), cx + cosf(a1) * rx * 0.92f };
-            float ys[3] = { cy + sinf(a0) * ry * 0.92f, cy + sa * ry * (1 + len), cy + sinf(a1) * ry * 0.92f };
-            fill_poly(c, xs, ys, 3, (i & 1) ? fur_dark : fur);
+            float under = clamp01((sa - 0.35f) / 0.5f);
+            float pr = R * (0.24f + 0.07f * trub_hash(i, f->preset + 41)) * (1 - 0.45f * under) * (0.55f + 0.45f * puff);
+            float d = 0.84f + 0.08f * puff;
+            fill_ellipse(c, cx + ca * rx * d, cy + sa * ry * d, pr * sx, pr * sy, fur_deep, 255);
         }
     }
-    /* the ball, and a soft light on its upper side */
+    /* the ball */
     fill_ellipse(c, cx, cy, rx, ry, fur, 255);
+    /* the inner puffs: fur-coloured, paler toward the top where the light
+       falls, straddling the rim so the outline stays soft */
+    {
+        const int NI = 12;
+        for (int i = 0; i < NI; i++) {
+            float a = f->roll + (i + 0.5f) * (6.2831853f / NI);
+            float ca = cosf(a), sa = sinf(a);
+            if (sa > 0.55f) continue;                  /* not along the bottom: it sits there */
+            float pr = R * (0.20f + 0.05f * trub_hash(i, f->preset + 53)) * (0.6f + 0.4f * puff);
+            float d = 0.80f + 0.06f * puff;
+            uint32_t col = mix(fur, fur_lite, 0.45f * clamp01(-sa));   /* -sa: up */
+            fill_ellipse(c, cx + ca * rx * d, cy + sa * ry * d, pr * sx, pr * sy, col, 255);
+        }
+    }
     /* markings (2026-10-09): the keeper's accent colour, coming in as it grows
        - none on a pip, two small spots on a tuft, three on a fluff - patches
        in the fur that turn with the roll like the tufts, through the fur's
