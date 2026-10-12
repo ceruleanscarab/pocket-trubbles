@@ -27,7 +27,9 @@ if [ -z "${TANK_PORT:-}" ] && [ "$(echo "$PORTS" | wc -l)" -gt 1 ]; then
 fi
 export TANK_PORT=${TANK_PORT:-$PORTS}
 PORT=$TANK_PORT
-IDF_EXPORT=${IDF_EXPORT:-$(ls ~/esp/esp-idf/export.sh ~/esp/esp-idf-v*/export.sh 2>/dev/null | head -1 || true)}   # macOS: esp-idf; WSL: esp-idf-v6
+# ESP-IDF: $IDF_EXPORT, else ~/esp/esp-idf (v5.4 - the firmware does not build on v6), else the first ~/esp/esp-idf-v*.
+# Tried in that order on purpose: `ls` would sort esp-idf-v6 before esp-idf (2026-10-12).
+if [ -z "${IDF_EXPORT:-}" ]; then for e in ~/esp/esp-idf/export.sh ~/esp/esp-idf-v*/export.sh; do [ -f "$e" ] && { IDF_EXPORT=$e; break; }; done; fi
 . "$IDF_EXPORT" > /dev/null 2>&1 || { echo "flash: ESP-IDF export failed"; exit 1; }
 [ -f firmware/keys/ota_signing_key.pem ] || { echo "flash: no firmware/keys/ota_signing_key.pem - tools/ota_key.sh (and back it up)"; exit 1; }
 python tools/preflight.py

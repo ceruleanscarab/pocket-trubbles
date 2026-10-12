@@ -17,7 +17,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 KEY=firmware/keys/ota_signing_key.pem
-IDF_EXPORT=${IDF_EXPORT:-$(ls ~/esp/esp-idf/export.sh ~/esp/esp-idf-v*/export.sh 2>/dev/null | head -1 || true)}   # macOS: esp-idf; WSL: esp-idf-v6
+# ESP-IDF: $IDF_EXPORT, else ~/esp/esp-idf (v5.4 - the firmware does not build on v6), else the first ~/esp/esp-idf-v*.
+# Tried in that order on purpose: `ls` would sort esp-idf-v6 before esp-idf (2026-10-12).
+if [ -z "${IDF_EXPORT:-}" ]; then for e in ~/esp/esp-idf/export.sh ~/esp/esp-idf-v*/export.sh; do [ -f "$e" ] && { IDF_EXPORT=$e; break; }; done; fi
 . "$IDF_EXPORT" > /dev/null 2>&1 || { echo "ota_key: ESP-IDF export failed"; exit 1; }
 if [[ "${1:-}" == "--pub" ]]; then
   [ -f "$KEY" ] || { echo "ota_key: no $KEY"; exit 1; }
