@@ -25,7 +25,7 @@ file(GLOB_RECURSE LVGL_SRCS ${REPO}/sim/lvgl/src/*.c)
 set(GAME_SRCS
     ${REPO}/sim/main.c ${REPO}/sim/advisor_llm.c ${REPO}/sim/persist_port_sim.c ${REPO}/sim/net_port_sim.c
     ${REPO}/common/tank.c ${REPO}/common/update.c ${REPO}/common/advisor.c ${REPO}/common/render.c
-    ${REPO}/common/icons.c ${REPO}/common/progression.c ${REPO}/common/setup.c ${REPO}/common/audio.c
+    ${REPO}/common/icons_cthulhu.c ${REPO}/common/progression.c ${REPO}/common/setup.c ${REPO}/common/audio.c
     ${REPO}/common/notice.c ${REPO}/common/sounds.c ${REPO}/common/battery.c
     ${REPO}/common/llm/q4_model.c ${REPO}/common/llm/word_tok.c ${REPO}/common/llm/advisor_core.c
     android_port.c)
